@@ -1,0 +1,40 @@
+{
+  "name": "Smart Proxy for SP-API Dev",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "dev",
+  "workspaceFolder": "/workspace",
+  "features": {
+    "ghcr.io/devcontainers/features/go:1": { "version": "1.25" },
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "forwardPorts": [8080, 8081, 8082, 9090, 5173, 5432],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go",
+        "svelte.svelte-vscode",
+        "ms-azuretools.vscode-docker",
+        "bradlc.vscode-tailwindcss",
+        "mtxr.sqltools",
+        "mtxr.sqltools-driver-sqlite",
+        "mtxr.sqltools-driver-pg",
+        "Anthropic.claude-code"
+      ],
+      "settings": {
+        "go.testFlags": ["-v", "-count=1"],
+        "go.lintTool": "golangci-lint"
+      }
+    }
+  },
+  "postCreateCommand": "go mod download",
+  "remoteUser": "vscode",
+  "containerEnv": {
+    "SP_PROXY_PORT_EU": "8080",
+    "SP_PROXY_PORT_NA": "8081",
+    "SP_PROXY_PORT_FE": "8082",
+    "SP_PROXY_PORT_DASHBOARD": "9090",
+    "SP_PROXY_DB_DRIVER": "postgres",
+    "SP_PROXY_DB_DSN": "postgres://smart_proxy:devpassword@postgres:5432/smart_proxy?sslmode=disable"
+  }
+}

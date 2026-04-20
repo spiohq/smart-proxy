@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@700;800&amp;family=Inter:wght@400;500;600&amp;family=Space_Grotesk:wght@400;500;700&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container-highest": "#35343a",
+                        "on-surface-variant": "#d8c2b7",
+                        "primary-fixed": "#ffdbc7",
+                        "inverse-surface": "#e5e1e9",
+                        "error": "#ffb4ab",
+                        "surface-container-lowest": "#0e0e13",
+                        "on-tertiary": "#00363d",
+                        "background": "#131318",
+                        "surface-dim": "#131318",
+                        "surface-container-high": "#2a292f",
+                        "on-error": "#690005",
+                        "on-primary-fixed": "#311300",
+                        "primary-container": "#d98f5d",
+                        "surface-variant": "#35343a",
+                        "secondary": "#8ad1e3",
+                        "surface-bright": "#3a383f",
+                        "primary": "#ffb687",
+                        "on-secondary-fixed": "#001f25",
+                        "on-primary-container": "#5b2900",
+                        "outline": "#a08d82",
+                        "on-secondary-container": "#90d8ea",
+                        "on-primary-fixed-variant": "#6f380d",
+                        "on-error-container": "#ffdad6",
+                        "on-tertiary-container": "#003d44",
+                        "surface": "#131318",
+                        "surface-container": "#201f25",
+                        "outline-variant": "#53443b",
+                        "inverse-on-surface": "#313036",
+                        "primary-fixed-dim": "#ffb687",
+                        "tertiary-container": "#57acb9",
+                        "surface-tint": "#ffb687",
+                        "error-container": "#93000a",
+                        "on-tertiary-fixed-variant": "#004f57",
+                        "secondary-fixed-dim": "#8ad1e3",
+                        "secondary-fixed": "#a7eeff",
+                        "surface-container-low": "#1c1b21",
+                        "on-tertiary-fixed": "#001f24",
+                        "on-secondary-fixed-variant": "#004e5b",
+                        "on-secondary": "#00363f",
+                        "secondary-container": "#00606f",
+                        "tertiary-fixed-dim": "#80d3e1",
+                        "on-background": "#e5e1e9",
+                        "tertiary-fixed": "#9cf0fd",
+                        "on-primary": "#512400",
+                        "inverse-primary": "#8b4f23",
+                        "tertiary": "#80d3e1",
+                        "on-surface": "#e5e1e9"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Space Grotesk"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        body { font-family: 'Inter', sans-serif; }
+        .font-headline { font-family: 'Manrope', sans-serif; }
+        .font-label { font-family: 'Space Grotesk', sans-serif; }
+        .glass-panel {
+            background: rgba(53, 52, 58, 0.7);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(83, 68, 59, 0.3);
+            border-left: 1px solid rgba(83, 68, 59, 0.3);
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background min-h-screen">
+<!-- Top Navigation Bar -->
+<header class="bg-[#131318] fixed top-0 z-50 w-full px-6 py-4 mx-auto flex justify-between items-center border-b border-outline-variant/10">
+<div class="flex items-center gap-8">
+<span class="text-xl font-bold tracking-tight text-[#2dd4bf] font-headline">SP-API Proxy</span>
+<nav class="hidden md:flex gap-6 items-center">
+<a class="text-[#e5e1e9] hover:text-[#ffb687] transition-colors font-label" href="#">Overview</a>
+<a class="text-[#ffb687] border-b-2 border-[#d98f5d] pb-2 font-label" href="#">Requests</a>
+<a class="text-[#e5e1e9] hover:text-[#ffb687] transition-colors font-label" href="#">Merchants</a>
+<a class="text-[#e5e1e9] hover:text-[#ffb687] transition-colors font-label" href="#">Endpoints</a>
+<a class="text-[#e5e1e9] hover:text-[#ffb687] transition-colors font-label" href="#">Cache</a>
+<a class="text-[#e5e1e9] hover:text-[#ffb687] transition-colors font-label" href="#">Throttle</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2 px-3 py-1 rounded-full bg-secondary-container/20 text-[#2dd4bf] animate-pulse shadow-[0_0_8px_#2dd4bf] text-xs font-bold font-label">
+<span class="w-1.5 h-1.5 rounded-full bg-[#2dd4bf]"></span>
+                Live
+            </div>
+<button class="material-symbols-outlined text-[#e5e1e9] hover:bg-[#3a383f] p-2 rounded-lg transition-all" data-icon="settings">settings</button>
+<button class="material-symbols-outlined text-[#e5e1e9] hover:bg-[#3a383f] p-2 rounded-lg transition-all" data-icon="account_circle">account_circle</button>
+</div>
+</header>
+<div class="flex pt-16">
+<!-- Main Content Area -->
+<main class="flex-1 px-8 py-6 max-w-[1600px] mx-auto w-full">
+<!-- Page Header & Active Filters -->
+<div class="mb-8 flex justify-between items-end">
+<div>
+<h1 class="text-4xl font-extrabold font-headline tracking-tight text-on-background mb-2">Request Log Browser</h1>
+<p class="text-on-surface-variant font-body">Real-time inspection of inbound and outbound API traffic across the SP ecosystem.</p>
+</div>
+<div class="flex gap-3">
+<button class="bg-surface-container hover:bg-surface-bright text-primary px-4 py-2 rounded-xl transition-all flex items-center gap-2 font-label text-sm border border-outline-variant/20">
+<span class="material-symbols-outlined text-sm" data-icon="download">download</span> Export JSON
+                    </button>
+<button class="bg-primary hover:bg-primary-container text-on-primary px-4 py-2 rounded-xl transition-all flex items-center gap-2 font-label text-sm font-bold">
+<span class="material-symbols-outlined text-sm" data-icon="refresh">refresh</span> Auto-refresh
+                    </button>
+</div>
+</div>
+<!-- Advanced Filter Bar -->
+<section class="bg-surface-container rounded-xl p-6 mb-8 border border-outline-variant/10 shadow-sm">
+<div class="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-6 gap-6">
+<!-- Method Pills -->
+<div class="col-span-1 md:col-span-2">
+<label class="text-xs font-bold text-outline uppercase tracking-wider mb-3 block font-label">HTTP Method</label>
+<div class="flex flex-wrap gap-2">
+<button class="px-3 py-1 rounded-lg bg-surface-bright text-[#2dd4bf] text-xs font-bold border border-outline-variant/40">GET</button>
+<button class="px-3 py-1 rounded-lg bg-surface-container-low text-on-surface-variant text-xs font-bold hover:bg-surface-bright transition-all">POST</button>
+<button class="px-3 py-1 rounded-lg bg-surface-container-low text-on-surface-variant text-xs font-bold hover:bg-surface-bright transition-all">PUT</button>
+<button class="px-3 py-1 rounded-lg bg-surface-container-low text-on-surface-variant text-xs font-bold hover:bg-surface-bright transition-all">DELETE</button>
+</div>
+</div>
+<!-- Status Checkboxes -->
+<div>
+<label class="text-xs font-bold text-outline uppercase tracking-wider mb-3 block font-label">Status Code</label>
+<div class="grid grid-cols-2 gap-2">
+<label class="flex items-center gap-2 text-xs font-label cursor-pointer group">
+<input checked="" class="rounded border-outline-variant bg-surface-container text-primary focus:ring-primary" type="checkbox"/>
+<span class="group-hover:text-primary transition-colors">2xx Success</span>
+</label>
+<label class="flex items-center gap-2 text-xs font-label cursor-pointer group">
+<input checked="" class="rounded border-outline-variant bg-surface-container text-primary focus:ring-primary" type="checkbox"/>
+<span class="group-hover:text-primary transition-colors">4xx Client</span>
+</label>
+<label class="flex items-center gap-2 text-xs font-label cursor-pointer group">
+<input class="rounded border-outline-variant bg-surface-container text-primary focus:ring-primary" type="checkbox"/>
+<span class="group-hover:text-primary transition-colors">5xx Server</span>
+</label>
+</div>
+</div>
+<!-- Cache Status -->
+<div>
+<label class="text-xs font-bold text-outline uppercase tracking-wider mb-3 block font-label">Cache</label>
+<select class="w-full bg-surface-container-highest border-none rounded-lg text-sm text-on-surface focus:ring-1 focus:ring-primary/40 font-label">
+<option>All Statuses</option>
+<option>HIT</option>
+<option>MISS</option>
+<option>BYPASS</option>
+</select>
+</div>
+<!-- Merchant Dropdown -->
+<div>
+<label class="text-xs font-bold text-outline uppercase tracking-wider mb-3 block font-label">Merchant</label>
+<select class="w-full bg-surface-container-highest border-none rounded-lg text-sm text-on-surface focus:ring-1 focus:ring-primary/40 font-label">
+<option>Global View</option>
+<option>Velvet_Loom_Store</option>
+<option>Arctic_Outpost_Global</option>
+</select>
+</div>
+<!-- Latency Preset -->
+<div>
+<label class="text-xs font-bold text-outline uppercase tracking-wider mb-3 block font-label">Latency</label>
+<select class="w-full bg-surface-container-highest border-none rounded-lg text-sm text-on-surface focus:ring-1 focus:ring-primary/40 font-label">
+<option>Any Speed</option>
+<option>&lt; 100ms</option>
+<option>&gt; 500ms</option>
+<option>&gt; 2s (Degraded)</option>
+</select>
+</div>
+</div>
+<div class="mt-6 pt-6 border-t border-outline-variant/10 flex items-center justify-between">
+<div class="flex items-center gap-6">
+<div class="relative w-96">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-lg" data-icon="search">search</span>
+<input class="w-full bg-surface-container-highest border-none rounded-xl pl-10 pr-4 py-2.5 text-sm font-label focus:ring-1 focus:ring-primary/40" placeholder="Filter by endpoint path (e.g. /v1/products...)" type="text"/>
+</div>
+<div class="flex items-center gap-3">
+<span class="text-xs font-label text-on-surface-variant">Queued Only</span>
+<button class="relative w-10 h-5 bg-surface-container-highest rounded-full border border-outline-variant/30 transition-all">
+<span class="absolute left-1 top-1 w-3 h-3 bg-outline rounded-full transition-all"></span>
+</button>
+</div>
+</div>
+<button class="text-sm font-bold text-primary hover:text-primary-container transition-colors font-label">Clear All Filters</button>
+</div>
+</section>
+<!-- High Density Table -->
+<div class="bg-surface-container rounded-xl overflow-hidden border border-outline-variant/10 shadow-lg mb-6">
+<table class="w-full text-left border-collapse">
+<thead class="bg-surface-container-high/50 border-b border-outline-variant/10">
+<tr class="font-label text-xs uppercase tracking-[0.1em] text-outline">
+<th class="px-6 py-4 font-bold">Timestamp</th>
+<th class="px-6 py-4 font-bold">Method</th>
+<th class="px-6 py-4 font-bold">Path</th>
+<th class="px-6 py-4 font-bold">Status</th>
+<th class="px-6 py-4 font-bold text-center">Cache</th>
+<th class="px-6 py-4 font-bold text-right">Latency</th>
+<th class="px-6 py-4 font-bold text-right">Size</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/5">
+<!-- Row 1 -->
+<tr class="group hover:bg-surface-bright transition-all cursor-pointer">
+<td class="px-6 py-4 font-label text-sm text-on-surface-variant">2023-11-24 <span class="opacity-40">14:22:18.442</span></td>
+<td class="px-6 py-4">
+<span class="bg-secondary-container/10 text-secondary px-2 py-0.5 rounded-md text-[10px] font-bold font-label border border-secondary/20">GET</span>
+</td>
+<td class="px-6 py-4 font-label text-sm font-medium text-on-surface">/v1/catalog/products/SP-90221</td>
+<td class="px-6 py-4">
+<span class="bg-green-500/10 text-green-400 px-2.5 py-1 rounded-full text-[10px] font-bold font-label">200 OK</span>
+</td>
+<td class="px-6 py-4 text-center">
+<div class="flex items-center justify-center gap-2">
+<span class="w-2 h-2 rounded-full bg-secondary"></span>
+<span class="text-[10px] font-label text-secondary font-bold">HIT</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right font-label text-sm text-on-surface-variant">42ms</td>
+<td class="px-6 py-4 text-right font-label text-sm text-on-surface-variant">1.2kb</td>
+</tr>
+<!-- Row 2 -->
+<tr class="group bg-surface-container-low/30 hover:bg-surface-bright transition-all cursor-pointer">
+<td class="px-6 py-4 font-label text-sm text-on-surface-variant">2023-11-24 <span class="opacity-40">14:22:15.109</span></td>
+<td class="px-6 py-4">
+<span class="bg-primary/10 text-primary px-2 py-0.5 rounded-md text-[10px] font-bold font-label border border-primary/20">POST</span>
+</td>
+<td class="px-6 py-4 font-label text-sm font-medium text-on-surface">/v1/orders/create</td>
+<td class="px-6 py-4">
+<span class="bg-green-500/10 text-green-400 px-2.5 py-1 rounded-full text-[10px] font-bold font-label">201 Created</span>
+</td>
+<td class="px-6 py-4 text-center">
+<div class="flex items-center justify-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<span class="text-[10px] font-label text-primary font-bold">BYPASS</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right font-label text-sm text-on-surface-variant">389ms</td>
+<td class="px-6 py-4 text-right font-label text-sm text-on-surface-variant">4.8kb</td>
+</tr>
+<!-- Row 3 -->
+<tr class="group hover:bg-surface-bright transition-all cursor-pointer">
+<td class="px-6 py-4 font-label text-sm text-on-surface-variant">2023-11-24 <span class="opacity-40">14:22:11.002</span></td>
+<td class="px-6 py-4">
+<span class="bg-secondary-container/10 text-secondary px-2 py-0.5 rounded-md text-[10px] font-bold font-label border border-secondary/20">GET</span>
+</td>
+<td class="px-6 py-4 font-label text-sm font-medium text-on-surface">/v1/reports/inventory/global</td>
+<td class="px-6 py-4">
+<span class="bg-error/10 text-error px-2.5 py-1 rounded-full text-[10px] font-bold font-label">429 Rate Limited</span>
+</td>
+<td class="px-6 py-4 text-center">
+<div class="flex items-center justify-center gap-2">
+<span class="w-2 h-2 rounded-full bg-outline-variant"></span>
+<span class="text-[10px] font-label text-outline font-bold">MISS</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right font-label text-sm text-error font-bold">2102ms</td>
+<td class="px-6 py-4 text-right font-label text-sm text-on-surface-variant">0.1kb</td>
+</tr>
+<!-- Row 4 -->
+<tr class="group bg-surface-container-low/30 hover:bg-surface-bright transition-all cursor-pointer">
+<td class="px-6 py-4 font-label text-sm text-on-surface-variant">2023-11-24 <span class="opacity-40">14:21:59.887</span></td>
+<td class="px-6 py-4">
+<span class="bg-secondary-container/10 text-secondary px-2 py-0.5 rounded-md text-[10px] font-bold font-label border border-secondary/20">GET</span>
+</td>
+<td class="px-6 py-4 font-label text-sm font-medium text-on-surface">/v1/merchants/M-4921/settings</td>
+<td class="px-6 py-4">
+<span class="bg-green-500/10 text-green-400 px-2.5 py-1 rounded-full text-[10px] font-bold font-label">200 OK</span>
+</td>
+<td class="px-6 py-4 text-center">
+<div class="flex items-center justify-center gap-2">
+<span class="w-2 h-2 rounded-full bg-secondary"></span>
+<span class="text-[10px] font-label text-secondary font-bold">HIT</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right font-label text-sm text-on-surface-variant">12ms</td>
+<td class="px-6 py-4 text-right font-label text-sm text-on-surface-variant">2.1kb</td>
+</tr>
+<!-- Row 5 -->
+<tr class="group hover:bg-surface-bright transition-all cursor-pointer">
+<td class="px-6 py-4 font-label text-sm text-on-surface-variant">2023-11-24 <span class="opacity-40">14:21:55.231</span></td>
+<td class="px-6 py-4">
+<span class="bg-[#d98f5d]/10 text-[#ffb687] px-2 py-0.5 rounded-md text-[10px] font-bold font-label border border-[#d98f5d]/20">PUT</span>
+</td>
+<td class="px-6 py-4 font-label text-sm font-medium text-on-surface">/v1/inventory/batch-update</td>
+<td class="px-6 py-4">
+<span class="bg-green-500/10 text-green-400 px-2.5 py-1 rounded-full text-[10px] font-bold font-label">204 No Content</span>
+</td>
+<td class="px-6 py-4 text-center">
+<div class="flex items-center justify-center gap-2">
+<span class="w-2 h-2 rounded-full bg-primary"></span>
+<span class="text-[10px] font-label text-primary font-bold">BYPASS</span>
+</div>
+</td>
+<td class="px-6 py-4 text-right font-label text-sm text-on-surface-variant">142ms</td>
+<td class="px-6 py-4 text-right font-label text-sm text-on-surface-variant">0kb</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Pagination -->
+<div class="flex items-center justify-between py-4 font-label text-sm text-on-surface-variant">
+<div class="flex items-center gap-4">
+<span class="text-xs uppercase tracking-widest text-outline">Showing 1-25 of 1,244 requests</span>
+<div class="h-4 w-px bg-outline-variant/30"></div>
+<div class="flex items-center gap-2">
+<span>Show</span>
+<select class="bg-surface-container border-none rounded text-xs py-1 px-2 focus:ring-0">
+<option>25</option>
+<option>50</option>
+<option>100</option>
+</select>
+</div>
+</div>
+<div class="flex items-center gap-1">
+<button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-container-highest transition-colors">
+<span class="material-symbols-outlined text-sm" data-icon="chevron_left">chevron_left</span>
+</button>
+<button class="w-8 h-8 flex items-center justify-center rounded-lg bg-primary text-on-primary font-bold">1</button>
+<button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-container-highest transition-colors">2</button>
+<button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-container-highest transition-colors">3</button>
+<span class="px-1 opacity-40">...</span>
+<button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-container-highest transition-colors">50</button>
+<button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-container-highest transition-colors">
+<span class="material-symbols-outlined text-sm" data-icon="chevron_right">chevron_right</span>
+</button>
+</div>
+</div>
+</main>
+</div>
+<!-- Detail Modal (Simulated Interaction Overlay) -->
+<div class="fixed inset-0 z-[100] flex items-center justify-center p-8 pointer-events-none">
+<div class="glass-panel w-full max-w-4xl max-h-[870px] rounded-2xl shadow-2xl flex flex-col pointer-events-auto border border-white/5 overflow-hidden">
+<!-- Modal Header -->
+<div class="p-6 bg-surface-container-high/40 flex justify-between items-start">
+<div class="flex flex-col gap-1">
+<div class="flex items-center gap-3 mb-2">
+<span class="bg-secondary/10 text-secondary px-2 py-0.5 rounded-md text-xs font-bold font-label border border-secondary/20">GET</span>
+<h2 class="text-xl font-headline font-bold text-on-background">/v1/catalog/products/SP-90221</h2>
+</div>
+<div class="flex gap-4 text-xs font-label text-on-surface-variant">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-sm" data-icon="schedule">schedule</span> Nov 24, 14:22:18.442</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-sm" data-icon="dns">dns</span> Proxy ID: PX-7781-A</span>
+</div>
+</div>
+<button class="material-symbols-outlined text-on-surface-variant hover:text-on-background transition-colors p-2" data-icon="close">close</button>
+</div>
+<!-- Modal Tabs -->
+<div class="flex border-b border-outline-variant/10 px-6">
+<button class="px-6 py-4 text-primary border-b-2 border-primary font-label text-sm font-bold">Headers</button>
+<button class="px-6 py-4 text-on-surface-variant hover:text-on-background font-label text-sm transition-colors">Params</button>
+<button class="px-6 py-4 text-on-surface-variant hover:text-on-background font-label text-sm transition-colors">Body</button>
+<button class="px-6 py-4 text-on-surface-variant hover:text-on-background font-label text-sm transition-colors">Cache Chain</button>
+</div>
+<!-- Modal Content -->
+<div class="flex-1 overflow-y-auto p-6 bg-surface-container-lowest">
+<!-- Response/Request Headers Example -->
+<div class="space-y-6">
+<div>
+<h3 class="text-[10px] uppercase font-label tracking-widest text-outline mb-3 font-bold">Request Headers</h3>
+<div class="grid grid-cols-[140px_1fr] gap-x-8 gap-y-2 font-label text-sm">
+<span class="text-on-surface-variant opacity-60">Authorization</span>
+<span class="text-primary truncate">Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...</span>
+<span class="text-on-surface-variant opacity-60">Content-Type</span>
+<span class="text-on-surface">application/json</span>
+<span class="text-on-surface-variant opacity-60">X-Merchant-Key</span>
+<span class="text-on-surface">MK-990-21-PRIME</span>
+</div>
+</div>
+<div>
+<h3 class="text-[10px] uppercase font-label tracking-widest text-outline mb-3 font-bold">Formatted Response Body</h3>
+<div class="bg-surface-container p-4 rounded-lg font-mono text-xs leading-relaxed overflow-x-auto text-secondary-fixed-dim border border-outline-variant/10">
+<pre>{
+  "status": "success",
+  "data": {
+    "product_id": "SP-90221",
+    "sku": "SKU-99001-A",
+    "name": "Obsidian Command Console",
+    "stock": {
+      "quantity": 142,
+      "location": "Warehouse-East-01"
+    },
+    "pricing": {
+      "currency": "USD",
+      "base_price": 299.99,
+      "discount": 0.0
+    }
+  },
+  "metadata": {
+    "cached": true,
+    "ttl": "3600s"
+  }
+}</pre>
+</div>
+</div>
+</div>
+</div>
+<!-- Modal Footer -->
+<div class="p-4 bg-surface-container-high/40 border-t border-outline-variant/10 flex justify-between items-center px-6">
+<div class="flex gap-4">
+<div class="flex items-center gap-2">
+<span class="text-[10px] font-label text-outline uppercase font-bold">Latency</span>
+<span class="text-sm font-label text-green-400 font-bold">42ms</span>
+</div>
+<div class="w-px h-4 bg-outline-variant/30"></div>
+<div class="flex items-center gap-2">
+<span class="text-[10px] font-label text-outline uppercase font-bold">Size</span>
+<span class="text-sm font-label text-on-surface font-bold">1.2kb</span>
+</div>
+</div>
+<button class="bg-surface-bright hover:bg-surface-container-highest text-on-surface px-4 py-2 rounded-lg transition-all text-xs font-label font-bold border border-outline-variant/20">
+                    Copy cURL Command
+                </button>
+</div>
+</div>
+</div>
+</body></html>

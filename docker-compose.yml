@@ -1,0 +1,22 @@
+services:
+  smart-proxy:
+    image: ghcr.io/spiohq/smart-proxy:latest
+    ports:
+      - "8080:8080"   # EU region
+      - "8081:8081"   # NA region
+      - "8082:8082"   # FE region
+      - "9090:9090"   # Dashboard
+    volumes:
+      - proxy-data:/data
+    env_file:
+      - deploy/example.env
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/_sp-proxy/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  proxy-data:

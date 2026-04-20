@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# SvelteKit build output
+.svelte-kit/
+
+# Local env files
+.env
+.env.*
+!.env.example
+
+# Vite cache
+.vite/

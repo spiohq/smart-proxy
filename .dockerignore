@@ -1,0 +1,40 @@
+# Version control
+.git/
+.worktrees/
+
+# Web dev dependencies (SPA is pre-built into internal/dashboard/static/)
+web/node_modules/
+web/.svelte-kit/
+
+# Tests and docs
+test/
+docs/
+
+# Markdown files (keep go.mod, go.sum which aren't .md)
+*.md
+
+# IDE files
+.vscode/
+.idea/
+.claude/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+/bin/
+/dist/
+/smart-proxy
+*.test
+*.out
+coverage.html
+
+# Data files
+/data/
+*.db
+*.db-journal
+*.db-wal
+
+# Deploy (not needed in image)
+deploy/

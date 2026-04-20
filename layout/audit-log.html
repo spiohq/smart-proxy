@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Audit Log | SP-API Proxy</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&amp;family=Inter:wght@300;400;500&amp;family=Space+Grotesk:wght@300;500;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary-fixed": "#a7eeff",
+                        "on-tertiary-fixed": "#001f24",
+                        "error-container": "#93000a",
+                        "surface-container-high": "#2a292f",
+                        "on-primary": "#512400",
+                        "on-error": "#690005",
+                        "inverse-primary": "#8b4f23",
+                        "tertiary-fixed-dim": "#80d3e1",
+                        "on-error-container": "#ffdad6",
+                        "tertiary-container": "#57acb9",
+                        "tertiary": "#80d3e1",
+                        "surface": "#131318",
+                        "on-tertiary-container": "#003d44",
+                        "surface-dim": "#131318",
+                        "primary-container": "#d98f5d",
+                        "outline": "#a08d82",
+                        "on-primary-fixed": "#311300",
+                        "outline-variant": "#53443b",
+                        "surface-variant": "#35343a",
+                        "primary-fixed": "#ffdbc7",
+                        "secondary": "#8ad1e3",
+                        "on-surface": "#e5e1e9",
+                        "surface-container-lowest": "#0e0e13",
+                        "surface-tint": "#ffb687",
+                        "on-tertiary-fixed-variant": "#004f57",
+                        "primary": "#ffb687",
+                        "on-primary-container": "#5b2900",
+                        "surface-container-low": "#1c1b21",
+                        "primary-fixed-dim": "#ffb687",
+                        "on-secondary": "#00363f",
+                        "secondary-container": "#00606f",
+                        "on-primary-fixed-variant": "#6f380d",
+                        "surface-container-highest": "#35343a",
+                        "on-secondary-fixed-variant": "#004e5b",
+                        "error": "#ffb4ab",
+                        "on-surface-variant": "#d8c2b7",
+                        "on-secondary-fixed": "#001f25",
+                        "on-tertiary": "#00363d",
+                        "background": "#131318",
+                        "secondary-fixed-dim": "#8ad1e3",
+                        "inverse-surface": "#e5e1e9",
+                        "surface-bright": "#3a383f",
+                        "on-background": "#e5e1e9",
+                        "inverse-on-surface": "#313036",
+                        "tertiary-fixed": "#9cf0fd",
+                        "on-secondary-container": "#90d8ea",
+                        "surface-container": "#201f25"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Space Grotesk"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        body {
+            background-color: #0e0e13;
+            color: #e5e1e9;
+        }
+    </style>
+</head>
+<body class="font-body selection:bg-primary selection:text-on-primary">
+<!-- Top Navigation Bar -->
+<header class="flex justify-between items-center w-full px-6 py-4 bg-[#131318] sticky top-0 z-50 shadow-2xl shadow-black/40">
+<div class="flex items-center gap-8">
+<span class="text-xl font-bold text-[#ffb687] tracking-wider font-headline">SP-API Proxy</span>
+<nav class="hidden md:flex items-center gap-6">
+<a class="text-xs font-space-grotesk tracking-tight text-[#e5e1e9]/60 hover:text-[#e5e1e9] transition-colors" href="#">Overview</a>
+<a class="text-xs font-space-grotesk tracking-tight text-[#e5e1e9]/60 hover:text-[#e5e1e9] transition-colors" href="#">Requests</a>
+<a class="text-xs font-space-grotesk tracking-tight text-[#e5e1e9]/60 hover:text-[#e5e1e9] transition-colors" href="#">Merchants</a>
+<a class="text-xs font-space-grotesk tracking-tight text-[#e5e1e9]/60 hover:text-[#e5e1e9] transition-colors" href="#">Endpoints</a>
+<a class="text-xs font-space-grotesk tracking-tight text-[#e5e1e9]/60 hover:text-[#e5e1e9] transition-colors" href="#">Cache</a>
+<a class="text-xs font-space-grotesk tracking-tight text-[#e5e1e9]/60 hover:text-[#e5e1e9] transition-colors" href="#">Throttle</a>
+<a class="text-xs font-space-grotesk tracking-tight text-[#e5e1e9]/60 hover:text-[#e5e1e9] transition-colors" href="#">Fees</a>
+<a class="text-xs font-space-grotesk tracking-tight text-[#ffb687] border-b-2 border-[#ffb687] pb-2 font-bold" href="#">Audit</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="p-2 rounded-full hover:bg-[#3a383f]/50 transition-all duration-300">
+<span class="material-symbols-outlined text-[#ffb687]">settings</span>
+</button>
+<button class="p-2 rounded-full hover:bg-[#3a383f]/50 transition-all duration-300">
+<span class="material-symbols-outlined text-[#ffb687]">account_circle</span>
+</button>
+</div>
+</header>
+<main class="max-w-[1400px] mx-auto px-6 py-12">
+<!-- Header Section -->
+<header class="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
+<div>
+<h1 class="text-4xl font-extrabold font-headline text-on-surface tracking-tight mb-2">Audit Log</h1>
+<p class="text-on-surface-variant font-body max-w-2xl">Full traceability for system-wide configuration and security events.</p>
+</div>
+<div class="flex gap-3">
+<button class="bg-gradient-to-br from-primary to-primary-container text-on-primary px-6 py-2 rounded-lg font-bold flex items-center gap-2 hover:shadow-[0_0_15px_rgba(255,182,135,0.4)] transition-all active:scale-95">
+<span class="material-symbols-outlined text-sm" style="font-variation-settings: 'FILL' 1;">download</span>
+<span class="font-label text-xs uppercase tracking-widest">Export Logs</span>
+</button>
+</div>
+</header>
+<!-- Controls / Filters -->
+<section class="mb-8 space-y-6">
+<div class="flex flex-wrap items-center gap-6">
+<!-- Time Range Selector -->
+<div class="flex items-center gap-2 bg-surface-container p-1 rounded-xl">
+<button class="px-4 py-1.5 text-xs font-label text-on-surface-variant hover:text-on-surface transition-colors">15m</button>
+<button class="px-4 py-1.5 text-xs font-label text-on-surface-variant hover:text-on-surface transition-colors">1h</button>
+<button class="px-4 py-1.5 text-xs font-label bg-surface-bright text-primary rounded-lg transition-colors">6h</button>
+<button class="px-4 py-1.5 text-xs font-label text-on-surface-variant hover:text-on-surface transition-colors">24h</button>
+<button class="px-4 py-1.5 text-xs font-label text-on-surface-variant hover:text-on-surface transition-colors">7d</button>
+<button class="px-4 py-1.5 text-xs font-label text-on-surface-variant hover:text-on-surface transition-colors">30d</button>
+</div>
+<!-- Event Type Filters -->
+<div class="flex flex-wrap items-center gap-2">
+<button class="px-3 py-1.5 rounded-md text-[10px] font-bold font-label uppercase tracking-wider bg-error-container/20 text-error border border-error/20 flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-error"></span> Error
+                    </button>
+<button class="px-3 py-1.5 rounded-md text-[10px] font-bold font-label uppercase tracking-wider bg-primary/10 text-primary border border-primary/20 flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-primary"></span> Warning
+                    </button>
+<button class="px-3 py-1.5 rounded-md text-[10px] font-bold font-label uppercase tracking-wider bg-secondary/10 text-secondary border border-secondary/20 flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-secondary"></span> Security
+                    </button>
+<button class="px-3 py-1.5 rounded-md text-[10px] font-bold font-label uppercase tracking-wider bg-primary-container/10 text-primary-container border border-primary-container/20 flex items-center gap-2">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-container"></span> Config Change
+                    </button>
+<button class="px-3 py-1.5 rounded-md text-[10px] font-bold font-label uppercase tracking-wider bg-transparent text-on-surface-variant border border-outline-variant/30 flex items-center gap-2 hover:bg-surface-variant transition-colors">
+                        Info
+                    </button>
+</div>
+</div>
+</section>
+<!-- Audit Table -->
+<section class="bg-surface-container rounded-xl overflow-hidden shadow-2xl shadow-black/60">
+<div class="grid grid-cols-[180px_140px_160px_1fr_100px] bg-surface-container-high px-6 py-4">
+<span class="text-[10px] font-bold font-label uppercase tracking-widest text-on-surface-variant">Timestamp</span>
+<span class="text-[10px] font-bold font-label uppercase tracking-widest text-on-surface-variant">Event Type</span>
+<span class="text-[10px] font-bold font-label uppercase tracking-widest text-on-surface-variant">Source</span>
+<span class="text-[10px] font-bold font-label uppercase tracking-widest text-on-surface-variant">Message</span>
+<span class="text-[10px] font-bold font-label uppercase tracking-widest text-on-surface-variant text-right">Action</span>
+</div>
+<!-- Rows -->
+<div class="divide-y divide-transparent">
+<!-- Row 1: Security -->
+<div class="group border-none">
+<div class="grid grid-cols-[180px_140px_160px_1fr_100px] items-center px-6 py-4 hover:bg-surface-bright transition-all cursor-pointer">
+<span class="text-xs font-label text-on-surface/80">2023-11-24 14:22:01</span>
+<div>
+<span class="text-[9px] font-bold px-2 py-0.5 rounded bg-secondary-container text-on-secondary-container uppercase">Security</span>
+</div>
+<span class="text-xs font-label text-secondary truncate">auth_service_v2</span>
+<span class="text-sm font-body text-on-surface truncate">Successful OAuth2 token generation for Merchant ID 98821</span>
+<div class="text-right">
+<span class="material-symbols-outlined text-outline group-hover:text-primary transition-colors">unfold_more</span>
+</div>
+</div>
+</div>
+<!-- Row 2: Error -->
+<div class="group border-none">
+<div class="grid grid-cols-[180px_140px_160px_1fr_100px] items-center px-6 py-4 hover:bg-surface-bright transition-all cursor-pointer">
+<span class="text-xs font-label text-on-surface/80">2023-11-24 14:19:45</span>
+<div>
+<span class="text-[9px] font-bold px-2 py-0.5 rounded bg-error-container text-on-error-container uppercase">Error</span>
+</div>
+<span class="text-xs font-label text-secondary truncate">proxy_node_04</span>
+<span class="text-sm font-body text-on-surface truncate">Upstream connection timeout: AWS-US-EAST-1 regional endpoint unresponsive</span>
+<div class="text-right">
+<span class="material-symbols-outlined text-outline group-hover:text-primary transition-colors">unfold_more</span>
+</div>
+</div>
+</div>
+<!-- Expanded JSON Example (Row 3 part 1) -->
+<div class="group border-none bg-surface-container-low">
+<div class="grid grid-cols-[180px_140px_160px_1fr_100px] items-center px-6 py-4 hover:bg-surface-bright transition-all cursor-pointer">
+<span class="text-xs font-label text-on-surface/80">2023-11-24 14:15:12</span>
+<div>
+<span class="text-[9px] font-bold px-2 py-0.5 rounded bg-primary-container/20 text-primary-container border border-primary-container/40 uppercase">Config</span>
+</div>
+<span class="text-xs font-label text-secondary truncate">admin_console</span>
+<span class="text-sm font-body text-on-surface truncate">Throttling limits updated for Tier-2 partners</span>
+<div class="text-right">
+<span class="material-symbols-outlined text-primary" style="font-variation-settings: 'FILL' 1;">unfold_less</span>
+</div>
+</div>
+<div class="px-6 pb-6 pt-0">
+<div class="bg-surface-container-lowest p-6 rounded-lg font-label text-xs leading-relaxed overflow-x-auto border-l-2 border-primary/40">
+<div class="flex gap-2">
+<span class="text-secondary opacity-80">{</span>
+</div>
+<div class="pl-4">
+<span class="text-secondary">"event_id"</span>: <span class="text-primary">"77d-99x-ac2"</span>, <br/>
+<span class="text-secondary">"actor"</span>: <span class="text-primary">"admin_user_01"</span>, <br/>
+<span class="text-secondary">"changes"</span>: <span class="text-secondary opacity-80">{</span> <br/>
+<div class="pl-4">
+<span class="text-secondary">"rate_limit"</span>: <span class="text-secondary opacity-60">"from: 500/m"</span>, <br/>
+<span class="text-secondary">"rate_limit_new"</span>: <span class="text-primary">"1000/m"</span>, <br/>
+<span class="text-secondary">"priority"</span>: <span class="text-primary">2</span>
+</div>
+<span class="text-secondary opacity-80">}</span>, <br/>
+<span class="text-secondary">"trace_id"</span>: <span class="text-primary">"0x99281772af881"</span>
+</div>
+<div class="flex gap-2">
+<span class="text-secondary opacity-80">}</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Row 4: Info -->
+<div class="group border-none">
+<div class="grid grid-cols-[180px_140px_160px_1fr_100px] items-center px-6 py-4 hover:bg-surface-bright transition-all cursor-pointer">
+<span class="text-xs font-label text-on-surface/80">2023-11-24 14:10:33</span>
+<div>
+<span class="text-[9px] font-bold px-2 py-0.5 rounded bg-surface-variant text-on-surface-variant uppercase">Info</span>
+</div>
+<span class="text-xs font-label text-secondary truncate">cache_mgr_main</span>
+<span class="text-sm font-body text-on-surface truncate">Routine cache cleanup completed: 4.2GB purged</span>
+<div class="text-right">
+<span class="material-symbols-outlined text-outline group-hover:text-primary transition-colors">unfold_more</span>
+</div>
+</div>
+</div>
+<!-- Row 5: Warning -->
+<div class="group border-none">
+<div class="grid grid-cols-[180px_140px_160px_1fr_100px] items-center px-6 py-4 hover:bg-surface-bright transition-all cursor-pointer">
+<span class="text-xs font-label text-on-surface/80">2023-11-24 13:58:12</span>
+<div>
+<span class="text-[9px] font-bold px-2 py-0.5 rounded bg-primary/20 text-primary border border-primary/20 uppercase">Warning</span>
+</div>
+<span class="text-xs font-label text-secondary truncate">throttle_engine</span>
+<span class="text-sm font-body text-on-surface truncate">Merchant ID 5521 nearing 90% quota utilization</span>
+<div class="text-right">
+<span class="material-symbols-outlined text-outline group-hover:text-primary transition-colors">unfold_more</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Pagination -->
+<footer class="mt-8 flex items-center justify-between bg-surface-container p-4 rounded-xl">
+<div class="flex items-center gap-4">
+<span class="text-xs font-label text-on-surface-variant">Showing 1-50 of 12,842 events</span>
+<div class="flex items-center gap-1 bg-surface-container-low p-1 rounded-lg">
+<span class="text-[10px] font-bold font-label px-2 text-on-surface-variant uppercase">Per Page:</span>
+<button class="text-xs font-label px-2 py-1 bg-surface-bright text-primary rounded">50</button>
+<button class="text-xs font-label px-2 py-1 text-on-surface-variant hover:text-on-surface">100</button>
+<button class="text-xs font-label px-2 py-1 text-on-surface-variant hover:text-on-surface">500</button>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-2 rounded-lg hover:bg-surface-bright text-on-surface-variant disabled:opacity-30" disabled="">
+<span class="material-symbols-outlined">chevron_left</span>
+</button>
+<div class="flex items-center gap-1">
+<button class="w-8 h-8 flex items-center justify-center text-xs font-label rounded-lg bg-primary text-on-primary">1</button>
+<button class="w-8 h-8 flex items-center justify-center text-xs font-label rounded-lg hover:bg-surface-bright text-on-surface-variant">2</button>
+<button class="w-8 h-8 flex items-center justify-center text-xs font-label rounded-lg hover:bg-surface-bright text-on-surface-variant">3</button>
+<span class="px-2 text-on-surface-variant">...</span>
+<button class="w-8 h-8 flex items-center justify-center text-xs font-label rounded-lg hover:bg-surface-bright text-on-surface-variant">257</button>
+</div>
+<button class="p-2 rounded-lg hover:bg-surface-bright text-on-surface-variant">
+<span class="material-symbols-outlined">chevron_right</span>
+</button>
+</div>
+</footer>
+</main>
+<!-- Side Visual Accent (Editorial) -->
+<div class="fixed right-0 top-1/4 h-64 w-1 bg-gradient-to-b from-primary/0 via-primary/40 to-primary/0"></div>
+<div class="fixed left-0 bottom-1/4 h-32 w-1 bg-gradient-to-b from-secondary/0 via-secondary/20 to-secondary/0"></div>
+</body></html>

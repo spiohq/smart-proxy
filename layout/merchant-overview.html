@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>SP-API Proxy | Merchants &amp; Endpoints</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&amp;family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@400;500;700&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "surface-container-highest": "#35343a",
+                        "on-surface-variant": "#d8c2b7",
+                        "primary-fixed": "#ffdbc7",
+                        "inverse-surface": "#e5e1e9",
+                        "error": "#ffb4ab",
+                        "surface-container-lowest": "#0e0e13",
+                        "on-tertiary": "#00363d",
+                        "background": "#131318",
+                        "surface-dim": "#131318",
+                        "surface-container-high": "#2a292f",
+                        "on-error": "#690005",
+                        "on-primary-fixed": "#311300",
+                        "primary-container": "#d98f5d",
+                        "surface-variant": "#35343a",
+                        "secondary": "#8ad1e3",
+                        "surface-bright": "#3a383f",
+                        "primary": "#ffb687",
+                        "on-secondary-fixed": "#001f25",
+                        "on-primary-container": "#5b2900",
+                        "outline": "#a08d82",
+                        "on-secondary-container": "#90d8ea",
+                        "on-primary-fixed-variant": "#6f380d",
+                        "on-error-container": "#ffdad6",
+                        "on-tertiary-container": "#003d44",
+                        "surface": "#131318",
+                        "surface-container": "#201f25",
+                        "outline-variant": "#53443b",
+                        "inverse-on-surface": "#313036",
+                        "primary-fixed-dim": "#ffb687",
+                        "tertiary-container": "#57acb9",
+                        "surface-tint": "#ffb687",
+                        "error-container": "#93000a",
+                        "on-tertiary-fixed-variant": "#004f57",
+                        "secondary-fixed-dim": "#8ad1e3",
+                        "secondary-fixed": "#a7eeff",
+                        "surface-container-low": "#1c1b21",
+                        "on-tertiary-fixed": "#001f24",
+                        "on-secondary-fixed-variant": "#004e5b",
+                        "on-secondary": "#00363f",
+                        "secondary-container": "#00606f",
+                        "tertiary-fixed-dim": "#80d3e1",
+                        "on-background": "#e5e1e9",
+                        "tertiary-fixed": "#9cf0fd",
+                        "on-primary": "#512400",
+                        "inverse-primary": "#8b4f23",
+                        "tertiary": "#80d3e1",
+                        "on-surface": "#e5e1e9"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "fontFamily": {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Space Grotesk"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            background-color: #131318;
+            color: #e5e1e9;
+            font-family: 'Inter', sans-serif;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .glass-card {
+            background: rgba(32, 31, 37, 0.7);
+            backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(83, 68, 59, 0.2);
+            border-left: 1px solid rgba(83, 68, 59, 0.2);
+        }
+        .proxy-pulse {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #8ad1e3;
+            box-shadow: 0 0 12px #8ad1e3;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopNavBar -->
+<nav class="fixed top-0 z-50 w-full bg-[#131318] flex justify-between items-center px-6 py-4 mx-auto max-w-full">
+<div class="flex items-center gap-8">
+<span class="text-xl font-bold tracking-tight text-[#2dd4bf] font-headline">SP-API Proxy</span>
+<div class="hidden md:flex gap-6 font-label">
+<a class="text-[#e5e1e9] hover:text-[#ffb687] transition-colors" href="#">Overview</a>
+<a class="text-[#e5e1e9] hover:text-[#ffb687] transition-colors" href="#">Requests</a>
+<a class="text-[#ffb687] border-b-2 border-[#d98f5d] pb-2" href="#">Merchants</a>
+<a class="text-[#e5e1e9] hover:text-[#ffb687] transition-colors" href="#">Endpoints</a>
+<a class="text-[#e5e1e9] hover:text-[#ffb687] transition-colors" href="#">Cache</a>
+<a class="text-[#e5e1e9] hover:text-[#ffb687] transition-colors" href="#">Throttle</a>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2 px-3 py-1 bg-surface-container rounded-full animate-pulse shadow-[0_0_8px_#2dd4bf]">
+<div class="w-2 h-2 bg-[#2dd4bf] rounded-full"></div>
+<span class="text-xs font-label text-[#2dd4bf] uppercase tracking-wider">Live</span>
+</div>
+<button class="material-symbols-outlined text-[#e5e1e9] hover:bg-[#3a383f] p-2 rounded-lg transition-all">settings</button>
+<button class="material-symbols-outlined text-[#e5e1e9] hover:bg-[#3a383f] p-2 rounded-lg transition-all">account_circle</button>
+</div>
+</nav>
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-0 h-full w-64 bg-[#0e0e13] border-r border-[#53443b]/20 flex flex-col pt-20 z-40 hidden lg:flex">
+<div class="px-6 mb-8">
+<h3 class="text-lg font-black text-[#ffb687] font-headline">System Admin</h3>
+<p class="text-xs text-on-surface-variant font-label">Proxy Management</p>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="flex items-center gap-3 px-4 py-3 text-[#e5e1e9]/60 hover:text-[#e5e1e9] hover:bg-[#3a383f]/50 transition-all duration-200" href="#">
+<span class="material-symbols-outlined">monitoring</span>
+<span class="font-label text-sm">Metrics</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-[#e5e1e9]/60 hover:text-[#e5e1e9] hover:bg-[#3a383f]/50 transition-all duration-200" href="#">
+<span class="material-symbols-outlined">terminal</span>
+<span class="font-label text-sm">Logs</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-[#e5e1e9]/60 hover:text-[#e5e1e9] hover:bg-[#3a383f]/50 transition-all duration-200" href="#">
+<span class="material-symbols-outlined">key</span>
+<span class="font-label text-sm">API Keys</span>
+</a>
+<a class="flex items-center gap-3 bg-[#201f25] text-[#ffb687] rounded-lg mx-2 px-4 py-3 transition-all duration-200" href="#">
+<span class="material-symbols-outlined">bar_chart</span>
+<span class="font-label text-sm font-medium">Usage</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-[#e5e1e9]/60 hover:text-[#e5e1e9] hover:bg-[#3a383f]/50 transition-all duration-200" href="#">
+<span class="material-symbols-outlined">security</span>
+<span class="font-label text-sm">Security</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-[#e5e1e9]/60 hover:text-[#e5e1e9] hover:bg-[#3a383f]/50 transition-all duration-200" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label text-sm">Settings</span>
+</a>
+</nav>
+<div class="mt-auto border-t border-[#53443b]/20 py-4">
+<a class="flex items-center gap-3 px-6 py-3 text-[#e5e1e9]/60 hover:text-[#e5e1e9] transition-all" href="#">
+<span class="material-symbols-outlined">description</span>
+<span class="font-label text-sm">Documentation</span>
+</a>
+<a class="flex items-center gap-3 px-6 py-3 text-[#e5e1e9]/60 hover:text-[#e5e1e9] transition-all" href="#">
+<span class="material-symbols-outlined">help</span>
+<span class="font-label text-sm">Support</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="lg:ml-64 pt-24 px-8 pb-12 max-w-[1400px] mx-auto min-h-screen">
+<!-- Header & Toggle Section -->
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
+<div>
+<h1 class="text-4xl font-extrabold font-headline tracking-tight mb-2 text-on-background">Merchant Analytics</h1>
+<p class="text-on-surface-variant max-w-xl font-body">Deep visibility into individual merchant performance, error distribution, and latency patterns across the SP-API proxy layer.</p>
+</div>
+<div class="flex p-1 bg-surface-container rounded-lg font-label text-sm">
+<button class="px-6 py-2 bg-surface-bright text-primary rounded shadow-lg transition-all">Merchants</button>
+<button class="px-6 py-2 text-on-surface-variant hover:text-on-background transition-all">Endpoints</button>
+</div>
+</div>
+<!-- Bento Stats Grid -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
+<!-- Large Focus Card -->
+<div class="md:col-span-2 glass-card rounded-xl p-8 flex flex-col justify-between overflow-hidden relative">
+<div class="relative z-10">
+<span class="font-label text-xs uppercase tracking-[0.2em] text-primary">Active Distribution</span>
+<h2 class="text-6xl font-headline font-extrabold mt-4">1,284</h2>
+<p class="text-on-surface-variant mt-2 font-body">Total Merchants onboarded in last 30 days.</p>
+</div>
+<div class="flex items-center gap-2 mt-8 text-secondary font-label text-sm">
+<span class="material-symbols-outlined">trending_up</span>
+<span>+12.4% vs previous month</span>
+</div>
+<div class="absolute -right-12 -bottom-12 w-48 h-48 bg-primary/10 rounded-full blur-3xl"></div>
+</div>
+<!-- Metric Card 1 -->
+<div class="bg-surface-container rounded-xl p-6 border-l-4 border-error/50">
+<div class="flex justify-between items-start mb-4">
+<span class="material-symbols-outlined text-error">error_outline</span>
+<span class="font-label text-[10px] px-2 py-1 bg-error-container/20 text-error rounded">CRITICAL</span>
+</div>
+<h3 class="font-label text-sm text-on-surface-variant mb-1">Avg. Error Rate</h3>
+<div class="text-3xl font-headline font-bold">0.42%</div>
+<div class="h-1.5 w-full bg-surface-container-highest rounded-full mt-4 overflow-hidden">
+<div class="h-full bg-error w-[42%]"></div>
+</div>
+</div>
+<!-- Metric Card 2 -->
+<div class="bg-surface-container rounded-xl p-6 border-l-4 border-secondary/50">
+<div class="flex justify-between items-start mb-4">
+<span class="material-symbols-outlined text-secondary">bolt</span>
+<span class="font-label text-[10px] px-2 py-1 bg-secondary-container/20 text-secondary rounded">PERFORMANCE</span>
+</div>
+<h3 class="font-label text-sm text-on-surface-variant mb-1">Mean Latency</h3>
+<div class="text-3xl font-headline font-bold">142ms</div>
+<p class="text-[10px] font-label text-secondary mt-4">98th percentile: 210ms</p>
+</div>
+</div>
+<!-- Data Table Section -->
+<section class="bg-surface-container rounded-xl overflow-hidden">
+<div class="px-8 py-6 border-b border-outline-variant/10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+<h3 class="font-headline font-bold text-lg">Merchant Performance Ledger</h3>
+<div class="flex items-center gap-3">
+<div class="relative">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant text-sm">search</span>
+<input class="bg-surface-container-highest border-none rounded-lg pl-10 pr-4 py-2 text-sm focus:ring-1 focus:ring-primary/40 w-64 placeholder:text-on-surface-variant/50 font-body" placeholder="Filter ID or Tag..." type="text"/>
+</div>
+<button class="bg-surface-container-highest p-2 rounded-lg hover:bg-surface-bright transition-all">
+<span class="material-symbols-outlined text-sm">filter_list</span>
+</button>
+</div>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low font-label text-[11px] uppercase tracking-widest text-on-surface-variant">
+<th class="px-8 py-4 font-medium">Merchant ID</th>
+<th class="px-6 py-4 font-medium">Requests</th>
+<th class="px-6 py-4 font-medium">Errors (4xx/5xx)</th>
+<th class="px-6 py-4 font-medium">Cache Hit</th>
+<th class="px-6 py-4 font-medium">Avg Latency</th>
+<th class="px-6 py-4 font-medium">P95</th>
+<th class="px-8 py-4 font-medium text-right">Status</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/5 font-body text-sm">
+<!-- Row 1 -->
+<tr class="hover:bg-surface-bright/30 transition-colors group">
+<td class="px-8 py-4 font-label font-medium text-primary tracking-tight">AMZ-MKT-9281-X</td>
+<td class="px-6 py-4">4.2M</td>
+<td class="px-6 py-4 text-error">1.2k (0.02%)</td>
+<td class="px-6 py-4 font-label">82.4%</td>
+<td class="px-6 py-4">118ms</td>
+<td class="px-6 py-4">164ms</td>
+<td class="px-8 py-4 text-right">
+<span class="inline-block w-2 h-2 rounded-full bg-secondary shadow-[0_0_8px_#8ad1e3]"></span>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-surface-bright/30 transition-colors group">
+<td class="px-8 py-4 font-label font-medium text-primary tracking-tight">WAL-US-K827-01</td>
+<td class="px-6 py-4">2.8M</td>
+<td class="px-6 py-4 text-error">42k (1.5%)</td>
+<td class="px-6 py-4 font-label">12.1%</td>
+<td class="px-6 py-4 text-error-container/100 text-error">482ms</td>
+<td class="px-6 py-4">912ms</td>
+<td class="px-8 py-4 text-right">
+<span class="inline-block w-2 h-2 rounded-full bg-error shadow-[0_0_8px_#ffb4ab]"></span>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-surface-bright/30 transition-colors group">
+<td class="px-8 py-4 font-label font-medium text-primary tracking-tight">EBY-EUR-GLOBAL</td>
+<td class="px-6 py-4">842k</td>
+<td class="px-6 py-4">142 (0.01%)</td>
+<td class="px-6 py-4 font-label">94.8%</td>
+<td class="px-6 py-4">84ms</td>
+<td class="px-6 py-4">110ms</td>
+<td class="px-8 py-4 text-right">
+<span class="inline-block w-2 h-2 rounded-full bg-secondary shadow-[0_0_8px_#8ad1e3]"></span>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="hover:bg-surface-bright/30 transition-colors group">
+<td class="px-8 py-4 font-label font-medium text-primary tracking-tight">SHO-PRO-PLN-10</td>
+<td class="px-6 py-4">1.1M</td>
+<td class="px-6 py-4 text-error">12k (1.09%)</td>
+<td class="px-6 py-4 font-label">65.2%</td>
+<td class="px-6 py-4">136ms</td>
+<td class="px-6 py-4">240ms</td>
+<td class="px-8 py-4 text-right">
+<span class="inline-block w-2 h-2 rounded-full bg-secondary-container shadow-[0_0_8px_#00606f]"></span>
+</td>
+</tr>
+<!-- Row 5 -->
+<tr class="hover:bg-surface-bright/30 transition-colors group">
+<td class="px-8 py-4 font-label font-medium text-primary tracking-tight">TGT-RTL-MAIN</td>
+<td class="px-6 py-4">12.5M</td>
+<td class="px-6 py-4">5.4k (0.04%)</td>
+<td class="px-6 py-4 font-label">78.1%</td>
+<td class="px-6 py-4">155ms</td>
+<td class="px-6 py-4">198ms</td>
+<td class="px-8 py-4 text-right">
+<span class="inline-block w-2 h-2 rounded-full bg-secondary shadow-[0_0_8px_#8ad1e3]"></span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="px-8 py-4 bg-surface-container-low flex justify-between items-center">
+<p class="text-[11px] font-label text-on-surface-variant/60">Showing 1-15 of 1,284 Merchants</p>
+<div class="flex gap-2">
+<button class="w-8 h-8 flex items-center justify-center rounded bg-surface-container-highest text-on-surface-variant hover:text-primary transition-all">
+<span class="material-symbols-outlined text-sm">chevron_left</span>
+</button>
+<button class="w-8 h-8 flex items-center justify-center rounded bg-primary text-on-primary font-label text-xs">1</button>
+<button class="w-8 h-8 flex items-center justify-center rounded bg-surface-container-highest text-on-surface-variant hover:text-primary transition-all">
+<span class="material-symbols-outlined text-sm">chevron_right</span>
+</button>
+</div>
+</div>
+</section>
+<!-- Dynamic Visualization Placeholder -->
+<section class="mt-12 grid grid-cols-1 lg:grid-cols-3 gap-6">
+<div class="lg:col-span-2 glass-card rounded-xl p-6 h-64 relative overflow-hidden">
+<div class="flex justify-between items-center mb-6">
+<h3 class="font-headline font-bold">Throughput Distribution</h3>
+<div class="flex gap-4 font-label text-[10px] text-on-surface-variant uppercase tracking-widest">
+<div class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-primary"></div> Success</div>
+<div class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-error"></div> Error</div>
+</div>
+</div>
+<!-- Mock Chart Area -->
+<div class="absolute bottom-0 left-0 w-full h-32 flex items-end px-8 gap-1">
+<div class="flex-1 bg-primary/20 h-[40%] rounded-t-sm"></div>
+<div class="flex-1 bg-primary/20 h-[45%] rounded-t-sm"></div>
+<div class="flex-1 bg-primary/20 h-[60%] rounded-t-sm relative">
+<div class="absolute top-0 w-full bg-error/40 h-[15%]"></div>
+</div>
+<div class="flex-1 bg-primary/20 h-[55%] rounded-t-sm"></div>
+<div class="flex-1 bg-primary/20 h-[80%] rounded-t-sm"></div>
+<div class="flex-1 bg-primary/20 h-[70%] rounded-t-sm"></div>
+<div class="flex-1 bg-primary/20 h-[40%] rounded-t-sm"></div>
+<div class="flex-1 bg-primary/20 h-[90%] rounded-t-sm relative">
+<div class="absolute top-0 w-full bg-error/40 h-[10%]"></div>
+</div>
+<div class="flex-1 bg-primary/20 h-[65%] rounded-t-sm"></div>
+<div class="flex-1 bg-primary/20 h-[30%] rounded-t-sm"></div>
+</div>
+</div>
+<div class="bg-surface-container rounded-xl p-6 flex flex-col justify-center items-center text-center">
+<div class="w-20 h-20 rounded-full border-4 border-primary/20 border-t-primary flex items-center justify-center mb-4">
+<span class="font-headline font-bold text-xl text-primary">88%</span>
+</div>
+<h4 class="font-label text-sm mb-2">System Health Index</h4>
+<p class="text-xs text-on-surface-variant px-8">Merchant-level error threshold is currently stable within P95 bounds.</p>
+</div>
+</section>
+</main>
+<!-- FAB Suppression: No FAB on Details Screen -->
+</body></html>

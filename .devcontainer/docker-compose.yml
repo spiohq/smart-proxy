@@ -1,0 +1,28 @@
+services:
+  dev:
+    build:
+      context: ..
+      dockerfile: .devcontainer/Dockerfile
+    volumes:
+      - ..:/workspace:cached
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+      - "8082:8082"
+      - "9090:9090"
+      - "5173:5173"
+    command: sleep infinity
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: smart_proxy
+      POSTGRES_USER: smart_proxy
+      POSTGRES_PASSWORD: devpassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

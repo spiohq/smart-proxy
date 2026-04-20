@@ -1,0 +1,28 @@
+# Development compose file - builds from local source.
+# Usage: docker compose -f docker-compose.dev.yml up --build
+#
+# Before first run, build the dashboard SPA:
+#   make web-build
+
+services:
+  smart-proxy:
+    build: .
+    ports:
+      - "8080:8080"   # EU region
+      - "8081:8081"   # NA region
+      - "8082:8082"   # FE region
+      - "9090:9090"   # Dashboard
+    volumes:
+      - dev-data:/data
+    env_file:
+      - deploy/example.env
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/_sp-proxy/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  dev-data:
