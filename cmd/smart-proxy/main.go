@@ -6,10 +6,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spiohq/smart-proxy/internal/audit"
+	"github.com/spiohq/smart-proxy/internal/blob"
 	"github.com/spiohq/smart-proxy/internal/bodies"
 	"github.com/spiohq/smart-proxy/internal/cache"
 	"github.com/spiohq/smart-proxy/internal/config"
@@ -81,7 +83,7 @@ func main() {
 	}
 	defer metaStore.Close()
 
-	bodyStore, err := bodies.NewStore(cfg.Bodies.BasePath)
+	bodyStore, err := bodies.NewLocalStore(cfg.Bodies.BasePath)
 	if err != nil {
 		slog.Error("failed to create body store", "error", err)
 		os.Exit(1)
@@ -96,11 +98,19 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Body rotator (background)
+	// Body rotator (background). Uses the same blob.Backend as the body
+	// store; a separate backend instance is fine here because local-FS
+	// backends are stateless across instances.
 	if cfg.Bodies.Enabled {
 		recentMaxAge, _ := time.ParseDuration(cfg.Bodies.RecentMaxAge)
 		archiveMaxAge, _ := time.ParseDuration(cfg.Bodies.ArchiveMaxAge)
-		rotator := bodies.NewRotator(cfg.Bodies.BasePath, recentMaxAge, archiveMaxAge)
+		rotatorBackend, err := blob.NewLocal(cfg.Bodies.BasePath)
+		if err != nil {
+			slog.Error("failed to create rotator backend", "error", err)
+			os.Exit(1)
+		}
+		currentDir := filepath.Join(cfg.Bodies.BasePath, "current")
+		rotator := bodies.NewRotator(rotatorBackend, currentDir, recentMaxAge, archiveMaxAge)
 		go rotator.Run(ctx)
 	}
 

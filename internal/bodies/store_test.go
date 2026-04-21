@@ -11,7 +11,7 @@ import (
 
 func TestStore_WriteAndRead_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewLocalStore(dir)
 	require.NoError(t, err)
 	defer store.Close()
 
@@ -35,13 +35,12 @@ func TestStore_WriteAndRead_RoundTrip(t *testing.T) {
 
 func TestStore_MultipleWriteAndRead(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewStore(dir)
+	store, err := NewLocalStore(dir)
 	require.NoError(t, err)
 	defer store.Close()
 
 	ctx := context.Background()
 
-	// Write 3 entries
 	entries := []BodyEntry{
 		{ID: "req-1", ResponseBody: json.RawMessage(`{"n":1}`)},
 		{ID: "req-2", ResponseBody: json.RawMessage(`{"n":2}`)},
@@ -61,7 +60,6 @@ func TestStore_MultipleWriteAndRead(t *testing.T) {
 		refs[i] = ref{f, o, l}
 	}
 
-	// Read them back in reverse order
 	for i := len(refs) - 1; i >= 0; i-- {
 		result, err := store.Read(ctx, refs[i].file, refs[i].offset, refs[i].length)
 		require.NoError(t, err)

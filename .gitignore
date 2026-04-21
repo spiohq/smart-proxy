@@ -41,3 +41,7 @@ internal/dashboard/static/
 
 # Worktrees
 .worktrees
+
+# Cache
+.gocache
+.gomodcache
