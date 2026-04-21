@@ -20,8 +20,15 @@ type BodyStore interface {
 }
 
 // BodyEntry is the JSONL structure written to the filesystem.
+//
+// Request/response headers live alongside the bodies so SQLite does not
+// carry the multiplicative per-row header cost (observed at ~520 MB on a
+// ~4 hour trace; zstd compresses headers extremely well since they are
+// highly repetitive across requests).
 type BodyEntry struct {
-	ID           string          `json:"id"`
-	RequestBody  json.RawMessage `json:"req,omitempty"`
-	ResponseBody json.RawMessage `json:"res,omitempty"`
+	ID              string            `json:"id"`
+	RequestHeaders  map[string]string `json:"reqh,omitempty"`
+	ResponseHeaders map[string]string `json:"resh,omitempty"`
+	RequestBody     json.RawMessage   `json:"req,omitempty"`
+	ResponseBody    json.RawMessage   `json:"res,omitempty"`
 }

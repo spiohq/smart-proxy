@@ -37,10 +37,26 @@ type StorageConfig struct {
 
 // BodiesConfig holds request/response body storage settings.
 type BodiesConfig struct {
-	Enabled       bool
-	BasePath      string // Base directory for body files
-	RecentMaxAge  string // Duration string, e.g. "72h"
-	ArchiveMaxAge string // Duration string, e.g. "8760h" (365 days)
+	Enabled        bool
+	BasePath       string // Base directory for body files (also holds current/ when Backend=s3)
+	Backend        string // "local" (default) or "s3"
+	RecentMaxAge   string // Duration string, e.g. "24h"
+	ArchiveMaxAge  string // Duration string, e.g. "720h" (30 days)
+	Compression    string // Codec for archive tier: "zstd" (default), "gzip", "none"
+	MaxCaptureSize int64  // Per-message byte cap for request/response bodies
+	MaxBytes       int64  // Hard cap across current/+recent/+archive/; 0 disables eviction
+	S3             S3Config
+}
+
+// S3Config holds S3 (or S3-compatible) backend settings. Only used when
+// BodiesConfig.Backend = "s3".
+type S3Config struct {
+	Bucket    string
+	Region    string
+	Endpoint  string // Custom endpoint for MinIO/R2; empty for real AWS
+	AccessKey string
+	SecretKey string
+	PathStyle bool // Required for MinIO; harmless for AWS
 }
 
 // PurgeConfig holds purge/retention settings for background jobs.
@@ -136,10 +152,22 @@ func loadConfig(logger *slog.Logger) *Config {
 			SQLitePath: envStr("SP_PROXY_SQLITE_PATH", "/data/sp-proxy.db"),
 		},
 		Bodies: BodiesConfig{
-			Enabled:       iBool("SP_PROXY_BODIES_ENABLED", true),
-			BasePath:      envStr("SP_PROXY_BODIES_PATH", "/data/bodies"),
-			RecentMaxAge:  envStr("SP_PROXY_BODIES_RECENT_MAX_AGE", "72h"),
-			ArchiveMaxAge: envStr("SP_PROXY_BODIES_ARCHIVE_MAX_AGE", "8760h"),
+			Enabled:        iBool("SP_PROXY_BODIES_ENABLED", true),
+			BasePath:       envStr("SP_PROXY_BODIES_PATH", "/data/bodies"),
+			Backend:        envStr("SP_PROXY_BODIES_BACKEND", "local"),
+			RecentMaxAge:   envStr("SP_PROXY_BODIES_RECENT_MAX_AGE", "24h"),
+			ArchiveMaxAge:  envStr("SP_PROXY_BODIES_ARCHIVE_MAX_AGE", "720h"),
+			Compression:    envStr("SP_PROXY_BODIES_COMPRESSION", "zstd"),
+			MaxCaptureSize: iInt64("SP_PROXY_BODIES_MAX_CAPTURE_SIZE", 256*1024),
+			MaxBytes:       iInt64("SP_PROXY_BODIES_MAX_BYTES", 8*1024*1024*1024),
+			S3: S3Config{
+				Bucket:    envStr("SP_PROXY_S3_BUCKET", ""),
+				Region:    envStr("SP_PROXY_S3_REGION", ""),
+				Endpoint:  envStr("SP_PROXY_S3_ENDPOINT", ""),
+				AccessKey: envStr("SP_PROXY_S3_ACCESS_KEY", ""),
+				SecretKey: envStr("SP_PROXY_S3_SECRET_KEY", ""),
+				PathStyle: iBool("SP_PROXY_S3_PATH_STYLE", false),
+			},
 		},
 		Purge: PurgeConfig{
 			MetadataRetention: envStr("SP_PROXY_PURGE_METADATA_RETENTION", "720h"),
@@ -301,6 +329,26 @@ func (c *Config) Validate() error {
 		}
 		if err := validatePositiveDuration("SP_PROXY_BODIES_ARCHIVE_MAX_AGE", c.Bodies.ArchiveMaxAge); err != nil {
 			return fmt.Errorf("invalid bodies archive max age %q: %w", c.Bodies.ArchiveMaxAge, err)
+		}
+		switch c.Bodies.Compression {
+		case "", "zstd", "gzip", "none":
+		default:
+			return fmt.Errorf("invalid SP_PROXY_BODIES_COMPRESSION %q (want zstd|gzip|none)", c.Bodies.Compression)
+		}
+		if c.Bodies.MaxCaptureSize <= 0 {
+			return fmt.Errorf("SP_PROXY_BODIES_MAX_CAPTURE_SIZE must be positive, got %d", c.Bodies.MaxCaptureSize)
+		}
+		if c.Bodies.MaxBytes < 0 {
+			return fmt.Errorf("SP_PROXY_BODIES_MAX_BYTES cannot be negative, got %d", c.Bodies.MaxBytes)
+		}
+		switch c.Bodies.Backend {
+		case "", "local":
+		case "s3":
+			if c.Bodies.S3.Bucket == "" {
+				return fmt.Errorf("SP_PROXY_S3_BUCKET is required when SP_PROXY_BODIES_BACKEND=s3")
+			}
+		default:
+			return fmt.Errorf("invalid SP_PROXY_BODIES_BACKEND %q (want local|s3)", c.Bodies.Backend)
 		}
 	}
 	for _, d := range []struct{ name, val string }{

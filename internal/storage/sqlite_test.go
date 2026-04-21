@@ -31,8 +31,6 @@ func testRequestLog(id, merchantKey string) *RequestLog {
 		CacheStatus:       "MISS",
 		UpstreamLatencyMs: 150,
 		TotalLatencyMs:    155,
-		RequestHeaders:    map[string]string{"Authorization": "[REDACTED]"},
-		ResponseHeaders:   map[string]string{"Content-Type": "application/json"},
 	}
 }
 
@@ -64,25 +62,6 @@ func TestSQLiteStore_LogRequest(t *testing.T) {
 	assert.Equal(t, "2026-03-25-14.jsonl", bodyFile)
 	assert.Equal(t, int64(1024), bodyOffset)
 	assert.Equal(t, 512, bodyLength)
-}
-
-func TestSQLiteStore_LogRequest_WithHeaders(t *testing.T) {
-	store := newTestStore(t)
-	ctx := context.Background()
-
-	entry := testRequestLog("req-002", "merchant-b")
-	entry.RequestHeaders = map[string]string{"Authorization": "[REDACTED]", "X-Custom": "value"}
-
-	err := store.LogRequest(ctx, entry)
-	require.NoError(t, err)
-
-	var headersJSON string
-	err = store.db.QueryRowContext(ctx,
-		"SELECT request_headers FROM request_logs WHERE id = ?", "req-002",
-	).Scan(&headersJSON)
-	require.NoError(t, err)
-	assert.Contains(t, headersJSON, "Authorization")
-	assert.Contains(t, headersJSON, "[REDACTED]")
 }
 
 func TestSQLiteStore_LogRequestBatch(t *testing.T) {
@@ -196,8 +175,6 @@ func TestSQLiteStore_QueryByID(t *testing.T) {
 	ctx := context.Background()
 
 	entry := testRequestLog("find-me", "merchant-a")
-	entry.RequestHeaders = map[string]string{"Auth": "[REDACTED]"}
-	entry.ResponseHeaders = map[string]string{"Content-Type": "application/json"}
 	require.NoError(t, store.LogRequest(ctx, entry))
 
 	found, err := store.QueryByID(ctx, "find-me")
@@ -205,7 +182,6 @@ func TestSQLiteStore_QueryByID(t *testing.T) {
 	require.NotNil(t, found)
 	assert.Equal(t, "find-me", found.ID)
 	assert.Equal(t, "merchant-a", found.MerchantKey)
-	assert.Equal(t, "[REDACTED]", found.RequestHeaders["Auth"])
 
 	// Not found
 	notFound, err := store.QueryByID(ctx, "nope")
@@ -388,4 +364,76 @@ func TestSQLiteStore_DistinctMerchants(t *testing.T) {
 	merchants, err = store.DistinctMerchants(ctx, "", 1)
 	require.NoError(t, err)
 	assert.Len(t, merchants, 1)
+}
+
+func TestSQLiteStore_NullifyBodyRefs(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	a := testRequestLog("req-a", "m")
+	a.BodyFile = "2026-04-20-10.jsonl"
+	a.BodyOffset = 100
+	a.BodyLength = 200
+	b := testRequestLog("req-b", "m")
+	b.BodyFile = "2026-04-20-11.jsonl"
+	b.BodyOffset = 300
+	b.BodyLength = 400
+	c := testRequestLog("req-c", "m")
+	c.BodyFile = "2026-04-20-12.jsonl"
+	c.BodyOffset = 500
+	c.BodyLength = 600
+	require.NoError(t, store.LogRequestBatch(ctx, []*RequestLog{a, b, c}))
+
+	n, err := store.NullifyBodyRefs(ctx, []string{"2026-04-20-10.jsonl", "2026-04-20-12.jsonl"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), n)
+
+	got, err := store.QueryByID(ctx, "req-a")
+	require.NoError(t, err)
+	assert.Equal(t, "", got.BodyFile)
+	assert.Equal(t, int64(0), got.BodyOffset)
+	assert.Equal(t, 0, got.BodyLength)
+
+	got, err = store.QueryByID(ctx, "req-b")
+	require.NoError(t, err)
+	assert.Equal(t, "2026-04-20-11.jsonl", got.BodyFile)
+	assert.Equal(t, int64(300), got.BodyOffset)
+	assert.Equal(t, 400, got.BodyLength)
+
+	got, err = store.QueryByID(ctx, "req-c")
+	require.NoError(t, err)
+	assert.Equal(t, "", got.BodyFile)
+}
+
+func TestSQLiteStore_NullifyBodyRefs_EmptyNoOp(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	n, err := store.NullifyBodyRefs(ctx, nil)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), n)
+}
+
+func TestSQLiteStore_Maintain(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	// Seed, purge, then maintain; the combination exercises incremental_vacuum
+	// against freed pages. We assert the call succeeds and that the store is
+	// still usable afterwards (a broken PRAGMA would leave the DB in a bad state).
+	for i := 0; i < 50; i++ {
+		e := testRequestLog(fmt.Sprintf("m-%03d", i), "merchant-a")
+		e.Timestamp = time.Now().UTC().Add(-48 * time.Hour)
+		require.NoError(t, store.LogRequest(ctx, e))
+	}
+	_, err := store.PurgeOlderThan(ctx, 24*time.Hour)
+	require.NoError(t, err)
+
+	require.NoError(t, store.Maintain(ctx))
+
+	// Store still accepts writes and reads after maintenance.
+	fresh := testRequestLog("fresh", "merchant-a")
+	require.NoError(t, store.LogRequest(ctx, fresh))
+	got, err := store.QueryByID(ctx, "fresh")
+	require.NoError(t, err)
+	require.NotNil(t, got)
 }

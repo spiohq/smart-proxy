@@ -237,11 +237,58 @@ All configuration is via environment variables. See [`deploy/example.env`](deplo
 
 | Variable | Default | Description |
 |---|---|---|
+| `SP_PROXY_STORAGE_BACKEND` | `sqlite` | Metadata store backend |
 | `SP_PROXY_SQLITE_PATH` | `/data/sp-proxy.db` | SQLite database path |
-| `SP_PROXY_BODIES_ENABLED` | `true` | Enable request/response body storage |
-| `SP_PROXY_BODIES_PATH` | `/data/bodies` | Body storage directory |
 | `SP_PROXY_PURGE_METADATA_RETENTION` | `720h` | Request log retention (30 days) |
 | `SP_PROXY_PURGE_AUDIT_RETENTION` | `8760h` | Audit log retention (365 days) |
+
+### Body Storage
+
+Request/response bodies live in hourly JSONL files on a three-tier path: the
+active hour is written to local disk (`current/`), closed files are moved to
+the configured backend (`recent/`), and older files are compressed and moved
+again (`archive/`). Headers live next to the payload in the same JSONL entry.
+
+| Variable | Default | Description |
+|---|---|---|
+| `SP_PROXY_BODIES_ENABLED` | `true` | Enable request/response body storage |
+| `SP_PROXY_BODIES_PATH` | `/data/bodies` | Local body storage root; always holds the active hour |
+| `SP_PROXY_BODIES_BACKEND` | `local` | Backend for `recent/` and `archive/`: `local` or `s3` |
+| `SP_PROXY_BODIES_RECENT_MAX_AGE` | `24h` | Age at which files leave `recent/` for `archive/` |
+| `SP_PROXY_BODIES_ARCHIVE_MAX_AGE` | `720h` | Age at which files are purged from `archive/` (30 days) |
+| `SP_PROXY_BODIES_COMPRESSION` | `zstd` | Archive codec: `zstd`, `gzip`, or `none` |
+| `SP_PROXY_BODIES_MAX_CAPTURE_SIZE` | `262144` | Per-message byte cap for captured bodies (256 KiB) |
+| `SP_PROXY_BODIES_MAX_BYTES` | `8589934592` | Hard cap across all tiers (8 GiB); `0` disables size eviction |
+
+> [!TIP]
+> **Quick sizing rules:**
+> - **Dev / CI / single-node**: `BODIES_BACKEND=local` is enough. Set `BODIES_MAX_BYTES` to 60-70% of your volume size so the size evictor wins before the filesystem fills up.
+> - **Production at ~100k+ req/h**: switch to `BODIES_BACKEND=s3`. The local disk only needs to hold the active hour plus staging (figure 2-4 GiB for typical SP-API traffic). Everything older lives on the object store.
+> - **Storage growth surprise**: the active hour is always local. If local disk fills up fast, it's not retention, it's `MAX_CAPTURE_SIZE` times your req/h. Drop the cap before raising the volume.
+> - **DB file not shrinking after purge**: SQLite maintenance runs hourly inside the metadata purge job. If the file still grows, check that the job is actually scheduled (look for `metadata purged` log lines).
+
+### S3 Backend
+
+Only read when `SP_PROXY_BODIES_BACKEND=s3`. Compatible with AWS S3, Hetzner
+Object Storage, MinIO, Cloudflare R2, and any other S3-compatible object store.
+
+| Variable | Default | Description |
+|---|---|---|
+| `SP_PROXY_S3_BUCKET` | | Bucket name |
+| `SP_PROXY_S3_REGION` | | AWS region (any non-empty value for non-AWS backends) |
+| `SP_PROXY_S3_ENDPOINT` | | Custom endpoint URL; leave blank for AWS S3 |
+| `SP_PROXY_S3_ACCESS_KEY` | | Access key; if blank, the default AWS credential chain is used |
+| `SP_PROXY_S3_SECRET_KEY` | | Secret key |
+| `SP_PROXY_S3_PATH_STYLE` | `false` | Set `true` for MinIO and some on-prem providers |
+
+> [!TIP]
+> **Per-provider gotchas:**
+> - **AWS S3**: on EC2/EKS/ECS, leave `ACCESS_KEY`/`SECRET_KEY` blank and attach an IAM role instead. `PATH_STYLE=false`.
+> - **Hetzner Object Storage**: set `REGION` to the datacenter code (`fsn1` / `nbg1` / `hel1`) and `ENDPOINT` to `https://<code>.your-objectstorage.com`. `PATH_STYLE=false`.
+> - **MinIO**: `PATH_STYLE=true` is required. `REGION` can be any non-empty value.
+> - **Cloudflare R2**: `REGION=auto`, `ENDPOINT=https://<account_id>.r2.cloudflarestorage.com`, `PATH_STYLE=false`.
+>
+> Full setup walkthroughs, IAM policy, compression tuning, sizing tables, and troubleshooting are in **[docs/STORAGE.md](docs/STORAGE.md)**.
 
 ---
 
@@ -397,6 +444,7 @@ make clean          # Clean build artifacts
 | [Rate Limiting](docs/RATE_LIMITING.md) | Token buckets, per-endpoint defaults, modes |
 | [Auto-RDT](docs/RDT.md) | Automatic RDT minting, caching, report handling |
 | [DPP Compliance](docs/DPP_COMPLIANCE.md) | PII redaction configuration, field mappings |
+| [Storage](docs/STORAGE.md) | Body tiers, retention, S3 / Hetzner / MinIO / R2 setup |
 | [Library Integrations](docs/libraries/) | Guides for popular SP-API client libraries |
 
 ---

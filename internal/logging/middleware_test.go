@@ -1,8 +1,10 @@
 package logging
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/spiohq/smart-proxy/internal/cache"
@@ -38,7 +40,7 @@ func TestLoggingMiddleware_BasicCapture(t *testing.T) {
 		w.Write([]byte(`{"data":"test"}`))
 	})
 
-	mw := LoggingMiddleware(logger, registry, "eu")(handler)
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
 
 	req := httptest.NewRequest("GET", "/orders/v0/orders?status=Shipped", nil)
 	req = withMerchant(req, "merchant-a")
@@ -84,7 +86,7 @@ func TestLoggingMiddleware_CacheHit(t *testing.T) {
 		w.Write([]byte(`{"cached":"data"}`))
 	})
 
-	mw := LoggingMiddleware(logger, registry, "na")(handler)
+	mw := LoggingMiddleware(logger, registry, "na", 0)(handler)
 
 	req := httptest.NewRequest("GET", "/catalog/2022-04-01/items/B123", nil)
 	req = withMerchant(req, "merchant-b")
@@ -99,8 +101,12 @@ func TestLoggingMiddleware_CacheHit(t *testing.T) {
 	assert.Equal(t, "HIT", allMeta[0].CacheStatus)
 	assert.Equal(t, "original-req-001", allMeta[0].CachedFromID)
 
-	// No body for cache hits
-	assert.Empty(t, bs.allEntries())
+	// Cache hits write a headers-only body entry (no payload, but headers still
+	// need to be retrievable from the JSONL file).
+	allBodies := bs.allEntries()
+	require.Len(t, allBodies, 1)
+	assert.Empty(t, allBodies[0].RequestBody)
+	assert.Empty(t, allBodies[0].ResponseBody)
 }
 
 func TestLoggingMiddleware_PIIEndpoint(t *testing.T) {
@@ -112,7 +118,7 @@ func TestLoggingMiddleware_PIIEndpoint(t *testing.T) {
 		w.Write([]byte(`{"payload":{"Orders":[{"BuyerInfo":{"BuyerEmail":"secret@test.com"}}]}}`))
 	})
 
-	mw := LoggingMiddleware(logger, registry, "eu")(handler)
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
 
 	req := httptest.NewRequest("GET", "/orders/v0/orders", nil)
 	req = withMerchant(req, "merchant-a")
@@ -131,14 +137,14 @@ func TestLoggingMiddleware_PIIEndpoint(t *testing.T) {
 }
 
 func TestLoggingMiddleware_RedactsRequestHeaders(t *testing.T) {
-	logger, ms, _ := setupTestLogger(t)
+	logger, _, bs := setupTestLogger(t)
 	registry := pii.NewRegistry()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 	})
 
-	mw := LoggingMiddleware(logger, registry, "eu")(handler)
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("Authorization", "Bearer secret-token")
@@ -150,10 +156,44 @@ func TestLoggingMiddleware_RedactsRequestHeaders(t *testing.T) {
 
 	logger.Close()
 
-	allMeta := ms.allEntries()
-	require.Len(t, allMeta, 1)
-	assert.Equal(t, "[REDACTED]", allMeta[0].RequestHeaders["Authorization"])
-	assert.Equal(t, "visible", allMeta[0].RequestHeaders["X-Custom"])
+	allBodies := bs.allEntries()
+	require.Len(t, allBodies, 1)
+	assert.Equal(t, "[REDACTED]", allBodies[0].RequestHeaders["Authorization"])
+	assert.Equal(t, "visible", allBodies[0].RequestHeaders["X-Custom"])
+}
+
+func TestLoggingMiddleware_CapsCapturedBodies(t *testing.T) {
+	logger, _, bs := setupTestLogger(t)
+	registry := pii.NewRegistry()
+
+	const cap = 64
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write(bytes.Repeat([]byte("A"), 4096))
+	})
+
+	mw := LoggingMiddleware(logger, registry, "eu", cap)(handler)
+
+	reqBody := strings.Repeat("B", 4096)
+	req := httptest.NewRequest("POST", "/test", strings.NewReader(reqBody))
+	req.ContentLength = int64(len(reqBody))
+	req = withMerchant(req, "merchant-a")
+
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	logger.Close()
+
+	allBodies := bs.allEntries()
+	require.Len(t, allBodies, 1)
+	// The request was 4 KiB but the cap was 64 bytes, so the middleware
+	// must not retain the oversized payload.
+	assert.LessOrEqual(t, len(allBodies[0].RequestBody), cap,
+		"request body must be dropped or truncated when ContentLength exceeds cap")
+	assert.LessOrEqual(t, len(allBodies[0].ResponseBody), cap,
+		"response body must be truncated to cap")
 }
 
 func TestLoggingMiddleware_SetsRequestIDInContext(t *testing.T) {
@@ -166,7 +206,7 @@ func TestLoggingMiddleware_SetsRequestIDInContext(t *testing.T) {
 		w.WriteHeader(200)
 	})
 
-	mw := LoggingMiddleware(logger, registry, "eu")(handler)
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req = withMerchant(req, "merchant-a")
@@ -190,7 +230,7 @@ func TestLoggingMiddleware_QueuedRequest(t *testing.T) {
 		w.WriteHeader(200)
 	})
 
-	mw := LoggingMiddleware(logger, registry, "eu")(handler)
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req = withMerchant(req, "merchant-a")
@@ -216,7 +256,7 @@ func TestLoggingMiddleware_ClientDisconnected_NotLogged(t *testing.T) {
 		w.Write([]byte(`{"errors":[{"code":"PROXY_ERROR","message":"upstream unavailable","detail":"client_disconnected"}]}`))
 	})
 
-	mw := LoggingMiddleware(logger, registry, "eu")(handler)
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
 
 	req := httptest.NewRequest("POST", "/batches/products/pricing/v0/listingOffers", nil)
 	req = withMerchant(req, "merchant-a")
@@ -247,7 +287,7 @@ func TestLoggingMiddleware_MerchantResolverBeforeLogger(t *testing.T) {
 
 	// Build middleware chain: resolver outermost, then logger, then handler
 	resolver := merchant.NewResolver(nil)
-	chain := resolver.Middleware()(LoggingMiddleware(logger, registry, "eu")(handler))
+	chain := resolver.Middleware()(LoggingMiddleware(logger, registry, "eu", 0)(handler))
 
 	req := httptest.NewRequest("GET", "/orders/v0/orders", nil)
 	req.Header.Set("X-SP-Proxy-Merchant-Id", "SELLER_TEST_123")
@@ -275,7 +315,7 @@ func TestLoggingMiddleware_MerchantFallbackToTokenHash(t *testing.T) {
 	})
 
 	resolver := merchant.NewResolver(nil)
-	chain := resolver.Middleware()(LoggingMiddleware(logger, registry, "eu")(handler))
+	chain := resolver.Middleware()(LoggingMiddleware(logger, registry, "eu", 0)(handler))
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("X-Amz-Access-Token", "Atza|some-token")

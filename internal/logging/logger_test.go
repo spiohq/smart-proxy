@@ -37,6 +37,9 @@ func (m *mockStore) LogRequestBatch(ctx context.Context, entries []*storage.Requ
 func (m *mockStore) PurgeOlderThan(ctx context.Context, age time.Duration) (int64, error) {
 	return 0, nil
 }
+func (m *mockStore) NullifyBodyRefs(ctx context.Context, files []string) (int64, error) {
+	return 0, nil
+}
 func (m *mockStore) QueryByTimeRange(ctx context.Context, from, to time.Time) ([]*storage.RequestLog, error) {
 	return nil, nil
 }
@@ -46,8 +49,9 @@ func (m *mockStore) QueryLogs(ctx context.Context, filter storage.LogFilter) ([]
 func (m *mockStore) QueryByID(ctx context.Context, id string) (*storage.RequestLog, error) {
 	return nil, nil
 }
-func (m *mockStore) Migrate(ctx context.Context) error { return nil }
-func (m *mockStore) Close() error                      { return nil }
+func (m *mockStore) Maintain(ctx context.Context) error { return nil }
+func (m *mockStore) Migrate(ctx context.Context) error  { return nil }
+func (m *mockStore) Close() error                       { return nil }
 func (m *mockStore) DistinctMerchants(ctx context.Context, prefix string, limit int) ([]string, error) {
 	return nil, nil
 }

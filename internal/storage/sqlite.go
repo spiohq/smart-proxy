@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -69,26 +68,23 @@ func (s *SQLiteStore) LogRequestBatch(ctx context.Context, entries []*RequestLog
 
 	stmt, err := tx.PrepareContext(ctx, `INSERT INTO request_logs (
 		id, timestamp, merchant_key, region, method, path, query_params,
-		request_headers, status_code, response_headers,
+		status_code,
 		request_content_length, response_content_length,
 		cache_status, queued, queue_wait_ms,
 		upstream_latency_ms, total_latency_ms,
 		pii_redacted, amazon_request_id,
 		body_file, body_offset, body_length,
 		cached_from_id, error_reason
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare insert: %w", err)
 	}
 	defer stmt.Close()
 
 	for _, e := range entries {
-		reqHeaders := marshalHeaders(e.RequestHeaders)
-		respHeaders := marshalHeaders(e.ResponseHeaders)
-
 		_, err := stmt.ExecContext(ctx,
 			e.ID, e.Timestamp.UTC(), e.MerchantKey, e.Region, e.Method, e.Path, e.QueryParams,
-			reqHeaders, e.StatusCode, respHeaders,
+			e.StatusCode,
 			e.RequestContentLength, e.ResponseContentLength,
 			e.CacheStatus, e.Queued, e.QueueWaitMs,
 			e.UpstreamLatencyMs, e.TotalLatencyMs,
@@ -115,28 +111,49 @@ func (s *SQLiteStore) PurgeOlderThan(ctx context.Context, age time.Duration) (in
 	return result.RowsAffected()
 }
 
-func marshalHeaders(h map[string]string) string {
-	if len(h) == 0 {
-		return "{}"
+// Maintain runs a WAL checkpoint (TRUNCATE mode, which empties the WAL) and
+// an incremental vacuum to reclaim freed pages. Incremental vacuum requires
+// auto_vacuum to be enabled; if it is not the statement is a no-op.
+func (s *SQLiteStore) Maintain(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		return fmt.Errorf("wal checkpoint: %w", err)
 	}
-	b, _ := json.Marshal(h)
-	return string(b)
+	if _, err := s.db.ExecContext(ctx, "PRAGMA incremental_vacuum"); err != nil {
+		return fmt.Errorf("incremental vacuum: %w", err)
+	}
+	return nil
 }
 
-func unmarshalHeaders(s string) map[string]string {
-	if s == "" {
-		return nil
+// NullifyBodyRefs clears body pointers for rows whose body_file matches any
+// of the supplied filenames. The filter is built as a single IN (...) clause
+// so it stays a single round-trip regardless of slice size.
+func (s *SQLiteStore) NullifyBodyRefs(ctx context.Context, files []string) (int64, error) {
+	if len(files) == 0 {
+		return 0, nil
 	}
-	var m map[string]string
-	json.Unmarshal([]byte(s), &m)
-	return m
+	placeholders := strings.Repeat("?,", len(files))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, 0, len(files))
+	for _, f := range files {
+		args = append(args, f)
+	}
+	query := fmt.Sprintf(
+		"UPDATE request_logs SET body_file = '', body_offset = 0, body_length = 0 WHERE body_file IN (%s)",
+		placeholders,
+	)
+	result, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("nullify body refs: %w", err)
+	}
+	return result.RowsAffected()
 }
 
 // QueryByTimeRange returns request logs within the given time range [from, to).
+// Headers are not populated; callers that need them must fetch the JSONL body.
 func (s *SQLiteStore) QueryByTimeRange(ctx context.Context, from, to time.Time) ([]*RequestLog, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, timestamp, merchant_key, region, method, path, query_params,
-			request_headers, status_code, response_headers,
+			status_code,
 			request_content_length, response_content_length,
 			cache_status, queued, queue_wait_ms,
 			upstream_latency_ms, total_latency_ms,
@@ -154,10 +171,9 @@ func (s *SQLiteStore) QueryByTimeRange(ctx context.Context, from, to time.Time) 
 	var result []*RequestLog
 	for rows.Next() {
 		e := &RequestLog{}
-		var reqHeaders, respHeaders string
 		err := rows.Scan(
 			&e.ID, &e.Timestamp, &e.MerchantKey, &e.Region, &e.Method, &e.Path, &e.QueryParams,
-			&reqHeaders, &e.StatusCode, &respHeaders,
+			&e.StatusCode,
 			&e.RequestContentLength, &e.ResponseContentLength,
 			&e.CacheStatus, &e.Queued, &e.QueueWaitMs,
 			&e.UpstreamLatencyMs, &e.TotalLatencyMs,
@@ -168,20 +184,18 @@ func (s *SQLiteStore) QueryByTimeRange(ctx context.Context, from, to time.Time) 
 		if err != nil {
 			return nil, fmt.Errorf("scan request log: %w", err)
 		}
-		e.RequestHeaders = unmarshalHeaders(reqHeaders)
-		e.ResponseHeaders = unmarshalHeaders(respHeaders)
 		result = append(result, e)
 	}
 	return result, rows.Err()
 }
 
 // QueryByID returns a single request log by ID. Returns nil, nil if not found.
+// Headers are not populated; callers that need them must fetch the JSONL body.
 func (s *SQLiteStore) QueryByID(ctx context.Context, id string) (*RequestLog, error) {
 	e := &RequestLog{}
-	var reqHeaders, respHeaders string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, timestamp, merchant_key, region, method, path, query_params,
-			request_headers, status_code, response_headers,
+			status_code,
 			request_content_length, response_content_length,
 			cache_status, queued, queue_wait_ms,
 			upstream_latency_ms, total_latency_ms,
@@ -191,7 +205,7 @@ func (s *SQLiteStore) QueryByID(ctx context.Context, id string) (*RequestLog, er
 		 FROM request_logs WHERE id = ?`, id,
 	).Scan(
 		&e.ID, &e.Timestamp, &e.MerchantKey, &e.Region, &e.Method, &e.Path, &e.QueryParams,
-		&reqHeaders, &e.StatusCode, &respHeaders,
+		&e.StatusCode,
 		&e.RequestContentLength, &e.ResponseContentLength,
 		&e.CacheStatus, &e.Queued, &e.QueueWaitMs,
 		&e.UpstreamLatencyMs, &e.TotalLatencyMs,
@@ -205,8 +219,6 @@ func (s *SQLiteStore) QueryByID(ctx context.Context, id string) (*RequestLog, er
 	if err != nil {
 		return nil, fmt.Errorf("query by id: %w", err)
 	}
-	e.RequestHeaders = unmarshalHeaders(reqHeaders)
-	e.ResponseHeaders = unmarshalHeaders(respHeaders)
 	return e, nil
 }
 
@@ -231,7 +243,7 @@ func (s *SQLiteStore) QueryLogs(ctx context.Context, filter LogFilter) ([]*Reque
 	}
 
 	dataSQL := `SELECT id, timestamp, merchant_key, region, method, path, query_params,
-		request_headers, status_code, response_headers,
+		status_code,
 		request_content_length, response_content_length,
 		cache_status, queued, queue_wait_ms,
 		upstream_latency_ms, total_latency_ms,
@@ -250,10 +262,9 @@ func (s *SQLiteStore) QueryLogs(ctx context.Context, filter LogFilter) ([]*Reque
 	var result []*RequestLog
 	for rows.Next() {
 		e := &RequestLog{}
-		var reqHeaders, respHeaders string
 		err := rows.Scan(
 			&e.ID, &e.Timestamp, &e.MerchantKey, &e.Region, &e.Method, &e.Path, &e.QueryParams,
-			&reqHeaders, &e.StatusCode, &respHeaders,
+			&e.StatusCode,
 			&e.RequestContentLength, &e.ResponseContentLength,
 			&e.CacheStatus, &e.Queued, &e.QueueWaitMs,
 			&e.UpstreamLatencyMs, &e.TotalLatencyMs,
@@ -264,8 +275,6 @@ func (s *SQLiteStore) QueryLogs(ctx context.Context, filter LogFilter) ([]*Reque
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan log: %w", err)
 		}
-		e.RequestHeaders = unmarshalHeaders(reqHeaders)
-		e.ResponseHeaders = unmarshalHeaders(respHeaders)
 		result = append(result, e)
 	}
 	return result, total, rows.Err()

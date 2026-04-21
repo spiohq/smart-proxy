@@ -2,35 +2,43 @@ package bodies
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"path/filepath"
+
+	"github.com/spiohq/smart-proxy/internal/blob"
 )
 
-// Store combines Writer and Reader into a complete BodyStore implementation.
+// Store combines Writer and Reader into a BodyStore implementation backed by
+// a local "current/" directory for active writes and a blob.Backend for the
+// recent/ and archive/ tiers.
 type Store struct {
-	writer *Writer
-	reader *Reader
+	writer  *Writer
+	reader  *Reader
+	backend blob.Backend
 }
 
-// NewStore creates a new BodyStore with the given base path.
-// Creates the directory structure (current/, recent/, archive/) if needed.
-func NewStore(basePath string) (*Store, error) {
-	for _, sub := range []string{"current", "recent", "archive"} {
-		if err := os.MkdirAll(filepath.Join(basePath, sub), 0755); err != nil {
-			return nil, fmt.Errorf("create %s dir: %w", sub, err)
-		}
-	}
-
-	writer, err := NewWriter(basePath)
+// NewStore creates a BodyStore. currentDir receives active writes; backend
+// receives promoted/compressed files under the recent/ and archive/ key
+// prefixes.
+func NewStore(backend blob.Backend, currentDir string) (*Store, error) {
+	w, err := NewWriter(currentDir)
 	if err != nil {
 		return nil, err
 	}
-
 	return &Store{
-		writer: writer,
-		reader: NewReader(basePath),
+		writer:  w,
+		reader:  NewReader(backend, currentDir),
+		backend: backend,
 	}, nil
+}
+
+// NewLocalStore is a convenience constructor that creates a local-backed
+// store under basePath (basePath/current/, basePath/recent/, basePath/archive/).
+func NewLocalStore(basePath string) (*Store, error) {
+	backend, err := blob.NewLocal(basePath)
+	if err != nil {
+		return nil, err
+	}
+	return NewStore(backend, filepath.Join(basePath, "current"))
 }
 
 func (s *Store) Write(ctx context.Context, entry *BodyEntry) (string, int64, int, error) {
@@ -42,5 +50,8 @@ func (s *Store) Read(ctx context.Context, file string, offset int64, length int)
 }
 
 func (s *Store) Close() error {
-	return s.writer.Close()
+	if err := s.writer.Close(); err != nil {
+		return err
+	}
+	return s.backend.Close()
 }

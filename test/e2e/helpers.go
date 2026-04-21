@@ -97,7 +97,7 @@ func NewTestEnv(t *testing.T, opts ...Option) *TestEnv {
 	require.NoError(t, err)
 
 	bodyDir := t.TempDir()
-	bodyStore, err := bodies.NewStore(bodyDir)
+	bodyStore, err := bodies.NewLocalStore(bodyDir)
 	require.NoError(t, err)
 
 	cfg := &config.Config{
@@ -182,7 +182,7 @@ func NewTestEnv(t *testing.T, opts ...Option) *TestEnv {
 
 	factory := func(region server.Region) http.Handler {
 		rp := proxy.NewTestProxyWithLimiter(mockHost, limiter)
-		logMiddleware := logging.LoggingMiddleware(asyncLogger, registry, string(region))
+		logMiddleware := logging.LoggingMiddleware(asyncLogger, registry, string(region), 0)
 		return proxy.BuildChain(rp, resolver.Middleware(), logMiddleware, rdtMiddleware, cacheMiddleware, rlMiddleware)
 	}
 

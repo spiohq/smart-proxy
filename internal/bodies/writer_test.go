@@ -14,12 +14,11 @@ import (
 func setupWriterTest(t *testing.T) (string, *Writer) {
 	t.Helper()
 	dir := t.TempDir()
-	// Create current/ subdirectory
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "current"), 0755))
-	w, err := NewWriter(dir)
+	currentDir := filepath.Join(dir, "current")
+	w, err := NewWriter(currentDir)
 	require.NoError(t, err)
 	t.Cleanup(func() { w.Close() })
-	return dir, w
+	return currentDir, w
 }
 
 func TestWriter_Write_ReturnsFileAndOffset(t *testing.T) {
@@ -34,7 +33,7 @@ func TestWriter_Write_ReturnsFileAndOffset(t *testing.T) {
 	file, offset, length, err := w.Write(ctx, entry)
 	require.NoError(t, err)
 	assert.NotEmpty(t, file)
-	assert.Equal(t, int64(0), offset) // First write starts at 0
+	assert.Equal(t, int64(0), offset)
 	assert.Greater(t, length, 0)
 }
 
@@ -57,7 +56,7 @@ func TestWriter_Write_SequentialOffsets(t *testing.T) {
 }
 
 func TestWriter_Write_ValidJSONL(t *testing.T) {
-	dir, w := setupWriterTest(t)
+	currentDir, w := setupWriterTest(t)
 	ctx := context.Background()
 
 	entry := &BodyEntry{
@@ -70,12 +69,11 @@ func TestWriter_Write_ValidJSONL(t *testing.T) {
 	require.NoError(t, err)
 	w.Close()
 
-	// Read the file and verify it's valid JSONL
-	content, err := os.ReadFile(filepath.Join(dir, "current", file))
+	content, err := os.ReadFile(filepath.Join(currentDir, file))
 	require.NoError(t, err)
 
 	var parsed BodyEntry
-	require.NoError(t, json.Unmarshal(content[:len(content)-1], &parsed)) // Strip trailing newline
+	require.NoError(t, json.Unmarshal(content[:len(content)-1], &parsed))
 	assert.Equal(t, "req-001", parsed.ID)
 	assert.Equal(t, `{"input":"data"}`, string(parsed.RequestBody))
 	assert.Equal(t, `{"output":"result"}`, string(parsed.ResponseBody))
@@ -89,6 +87,5 @@ func TestWriter_Write_FileNameFormat(t *testing.T) {
 	file, _, _, err := w.Write(ctx, entry)
 	require.NoError(t, err)
 
-	// File name should match YYYY-MM-DD-HH.jsonl pattern
 	assert.Regexp(t, `^\d{4}-\d{2}-\d{2}-\d{2}\.jsonl$`, file)
 }

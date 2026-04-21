@@ -6,10 +6,12 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spiohq/smart-proxy/internal/audit"
+	"github.com/spiohq/smart-proxy/internal/blob"
 	"github.com/spiohq/smart-proxy/internal/bodies"
 	"github.com/spiohq/smart-proxy/internal/cache"
 	"github.com/spiohq/smart-proxy/internal/config"
@@ -81,7 +83,13 @@ func main() {
 	}
 	defer metaStore.Close()
 
-	bodyStore, err := bodies.NewStore(cfg.Bodies.BasePath)
+	currentDir := filepath.Join(cfg.Bodies.BasePath, "current")
+	bodyBackend, err := newBodyBackend(context.Background(), cfg)
+	if err != nil {
+		slog.Error("failed to create body backend", "error", err)
+		os.Exit(1)
+	}
+	bodyStore, err := bodies.NewStore(bodyBackend, currentDir)
 	if err != nil {
 		slog.Error("failed to create body store", "error", err)
 		os.Exit(1)
@@ -96,11 +104,23 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Body rotator (background)
+	// Body rotator (background). Reuses the body store's backend so both
+	// see the same object inventory; local and S3 backends are safely shared.
 	if cfg.Bodies.Enabled {
 		recentMaxAge, _ := time.ParseDuration(cfg.Bodies.RecentMaxAge)
 		archiveMaxAge, _ := time.ParseDuration(cfg.Bodies.ArchiveMaxAge)
-		rotator := bodies.NewRotator(cfg.Bodies.BasePath, recentMaxAge, archiveMaxAge)
+		codec, err := bodies.NewCodec(cfg.Bodies.Compression)
+		if err != nil {
+			slog.Error("invalid bodies compression codec", "error", err)
+			os.Exit(1)
+		}
+		rotator := bodies.NewRotator(bodyBackend, currentDir, bodies.RotatorOptions{
+			Codec:          codec,
+			RecentMaxAge:   recentMaxAge,
+			ArchiveMaxAge:  archiveMaxAge,
+			MaxBytes:       cfg.Bodies.MaxBytes,
+			OrphanNotifier: storeOrphanNotifier{store: metaStore},
+		})
 		go rotator.Run(ctx)
 	}
 
@@ -201,7 +221,7 @@ func main() {
 				http.Error(w, "proxy misconfigured", http.StatusInternalServerError)
 			})
 		}
-		logMiddleware := logging.LoggingMiddleware(asyncLogger, registry, string(region))
+		logMiddleware := logging.LoggingMiddleware(asyncLogger, registry, string(region), cfg.Bodies.MaxCaptureSize)
 		rdtMw := rdtMiddlewareFn(region)
 		middlewares := []proxy.Middleware{resolver.Middleware(), logMiddleware, rdtMw, cacheMiddleware, rlMiddleware}
 		if promMetrics != nil {
@@ -221,4 +241,41 @@ func main() {
 		slog.Error("server error", "error", err)
 		os.Exit(1)
 	}
+}
+
+// newBodyBackend constructs the blob.Backend selected by
+// SP_PROXY_BODIES_BACKEND. Local is the default; s3 uses the S3Config block.
+func newBodyBackend(ctx context.Context, cfg *config.Config) (blob.Backend, error) {
+	switch cfg.Bodies.Backend {
+	case "", "local":
+		return blob.NewLocal(cfg.Bodies.BasePath)
+	case "s3":
+		return blob.NewS3(ctx, blob.S3Options{
+			Bucket:    cfg.Bodies.S3.Bucket,
+			Region:    cfg.Bodies.S3.Region,
+			Endpoint:  cfg.Bodies.S3.Endpoint,
+			AccessKey: cfg.Bodies.S3.AccessKey,
+			SecretKey: cfg.Bodies.S3.SecretKey,
+			PathStyle: cfg.Bodies.S3.PathStyle,
+		})
+	default:
+		return nil, fmt.Errorf("unsupported bodies backend: %s", cfg.Bodies.Backend)
+	}
+}
+
+// storeOrphanNotifier adapts a storage.Store to bodies.OrphanNotifier so the
+// rotator can null dangling body pointers when it deletes objects.
+type storeOrphanNotifier struct {
+	store storage.Store
+}
+
+func (s storeOrphanNotifier) OnBodiesDeleted(ctx context.Context, files []string) error {
+	n, err := s.store.NullifyBodyRefs(ctx, files)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		slog.Info("rotator: nulled body refs", "count", n, "files", len(files))
+	}
+	return nil
 }

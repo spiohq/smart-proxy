@@ -150,3 +150,41 @@ func TestValidate_SQLitePathMemoryOK(t *testing.T) {
 	err := cfg.Validate()
 	assert.NoError(t, err)
 }
+
+func TestLoad_BodiesDefaults(t *testing.T) {
+	cfg := Load()
+	assert.True(t, cfg.Bodies.Enabled)
+	assert.Equal(t, "/data/bodies", cfg.Bodies.BasePath)
+	assert.Equal(t, "24h", cfg.Bodies.RecentMaxAge)
+	assert.Equal(t, "720h", cfg.Bodies.ArchiveMaxAge)
+	assert.Equal(t, "zstd", cfg.Bodies.Compression)
+	assert.Equal(t, int64(256*1024), cfg.Bodies.MaxCaptureSize)
+	assert.Equal(t, int64(8*1024*1024*1024), cfg.Bodies.MaxBytes)
+}
+
+func TestValidate_BodiesMaxBytesNegative(t *testing.T) {
+	cfg := Load()
+	cfg.Bodies.Enabled = true
+	cfg.Bodies.MaxBytes = -1
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "MAX_BYTES")
+}
+
+func TestValidate_BodiesMaxCaptureSize(t *testing.T) {
+	cfg := Load()
+	cfg.Bodies.Enabled = true
+	cfg.Bodies.MaxCaptureSize = 0
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "MAX_CAPTURE_SIZE")
+}
+
+func TestValidate_BodiesCompressionUnknown(t *testing.T) {
+	cfg := Load()
+	cfg.Bodies.Enabled = true
+	cfg.Bodies.Compression = "lz4"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "COMPRESSION")
+}

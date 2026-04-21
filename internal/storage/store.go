@@ -18,6 +18,18 @@ type Store interface {
 	// Returns the number of rows deleted.
 	PurgeOlderThan(ctx context.Context, age time.Duration) (int64, error)
 
+	// NullifyBodyRefs clears body_file/body_offset/body_length on any row
+	// that points at one of the supplied filenames. Used by the body
+	// rotator after it deletes an object, so metadata no longer advertises
+	// references to bodies that are gone. Returns the number of rows
+	// updated.
+	NullifyBodyRefs(ctx context.Context, files []string) (int64, error)
+
+	// Maintain runs housekeeping: a WAL checkpoint to drain the log back
+	// into the main database file, and an incremental vacuum to hand freed
+	// pages back to the filesystem. Safe to call while writes are ongoing.
+	Maintain(ctx context.Context) error
+
 	// QueryByTimeRange returns request logs within the given time range [from, to).
 	QueryByTimeRange(ctx context.Context, from, to time.Time) ([]*RequestLog, error)
 
@@ -43,7 +55,9 @@ type Store interface {
 	Close() error
 }
 
-// RequestLog holds metadata for a single proxied request.
+// RequestLog holds metadata for a single proxied request. Headers are NOT
+// part of the metadata; they live in the JSONL body file alongside the
+// payload. See bodies.BodyEntry for how they are retrieved.
 type RequestLog struct {
 	ID                    string
 	Timestamp             time.Time
@@ -52,9 +66,7 @@ type RequestLog struct {
 	Method                string
 	Path                  string
 	QueryParams           string
-	RequestHeaders        map[string]string // Redacted by caller
 	StatusCode            int
-	ResponseHeaders       map[string]string
 	CacheStatus           string // HIT, MISS, BYPASS, PII_EXCLUDED
 	Queued                bool
 	QueueWaitMs           int64
@@ -65,7 +77,7 @@ type RequestLog struct {
 	RequestContentLength  int64
 	ResponseContentLength int64
 
-	// Body reference (points to filesystem JSONL file)
+	// Body reference (points to filesystem JSONL file). Headers live there too.
 	BodyFile   string // e.g., "2026-03-25-14.jsonl"
 	BodyOffset int64  // Byte offset within the file
 	BodyLength int    // Byte length of the JSONL entry
@@ -75,6 +87,12 @@ type RequestLog struct {
 
 	// Cache hit reference
 	CachedFromID string // For cache hits: ID of the original request that populated the cache
+
+	// RequestHeaders/ResponseHeaders are populated on read by joining the
+	// JSONL body entry, not by the database. Writers leave them nil; the
+	// dashboard's body-fetch endpoint returns them as part of the body.
+	RequestHeaders  map[string]string `json:"-"`
+	ResponseHeaders map[string]string `json:"-"`
 }
 
 // LogFilter defines criteria for querying request logs.
