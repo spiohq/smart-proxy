@@ -31,8 +31,6 @@ func testRequestLog(id, merchantKey string) *RequestLog {
 		CacheStatus:       "MISS",
 		UpstreamLatencyMs: 150,
 		TotalLatencyMs:    155,
-		RequestHeaders:    map[string]string{"Authorization": "[REDACTED]"},
-		ResponseHeaders:   map[string]string{"Content-Type": "application/json"},
 	}
 }
 
@@ -64,25 +62,6 @@ func TestSQLiteStore_LogRequest(t *testing.T) {
 	assert.Equal(t, "2026-03-25-14.jsonl", bodyFile)
 	assert.Equal(t, int64(1024), bodyOffset)
 	assert.Equal(t, 512, bodyLength)
-}
-
-func TestSQLiteStore_LogRequest_WithHeaders(t *testing.T) {
-	store := newTestStore(t)
-	ctx := context.Background()
-
-	entry := testRequestLog("req-002", "merchant-b")
-	entry.RequestHeaders = map[string]string{"Authorization": "[REDACTED]", "X-Custom": "value"}
-
-	err := store.LogRequest(ctx, entry)
-	require.NoError(t, err)
-
-	var headersJSON string
-	err = store.db.QueryRowContext(ctx,
-		"SELECT request_headers FROM request_logs WHERE id = ?", "req-002",
-	).Scan(&headersJSON)
-	require.NoError(t, err)
-	assert.Contains(t, headersJSON, "Authorization")
-	assert.Contains(t, headersJSON, "[REDACTED]")
 }
 
 func TestSQLiteStore_LogRequestBatch(t *testing.T) {
@@ -196,8 +175,6 @@ func TestSQLiteStore_QueryByID(t *testing.T) {
 	ctx := context.Background()
 
 	entry := testRequestLog("find-me", "merchant-a")
-	entry.RequestHeaders = map[string]string{"Auth": "[REDACTED]"}
-	entry.ResponseHeaders = map[string]string{"Content-Type": "application/json"}
 	require.NoError(t, store.LogRequest(ctx, entry))
 
 	found, err := store.QueryByID(ctx, "find-me")
@@ -205,7 +182,6 @@ func TestSQLiteStore_QueryByID(t *testing.T) {
 	require.NotNil(t, found)
 	assert.Equal(t, "find-me", found.ID)
 	assert.Equal(t, "merchant-a", found.MerchantKey)
-	assert.Equal(t, "[REDACTED]", found.RequestHeaders["Auth"])
 
 	// Not found
 	notFound, err := store.QueryByID(ctx, "nope")

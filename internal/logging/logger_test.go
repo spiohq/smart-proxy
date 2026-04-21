@@ -49,8 +49,9 @@ func (m *mockStore) QueryLogs(ctx context.Context, filter storage.LogFilter) ([]
 func (m *mockStore) QueryByID(ctx context.Context, id string) (*storage.RequestLog, error) {
 	return nil, nil
 }
-func (m *mockStore) Migrate(ctx context.Context) error { return nil }
-func (m *mockStore) Close() error                      { return nil }
+func (m *mockStore) Maintain(ctx context.Context) error { return nil }
+func (m *mockStore) Migrate(ctx context.Context) error  { return nil }
+func (m *mockStore) Close() error                       { return nil }
 func (m *mockStore) DistinctMerchants(ctx context.Context, prefix string, limit int) ([]string, error) {
 	return nil, nil
 }

@@ -99,8 +99,12 @@ func TestLoggingMiddleware_CacheHit(t *testing.T) {
 	assert.Equal(t, "HIT", allMeta[0].CacheStatus)
 	assert.Equal(t, "original-req-001", allMeta[0].CachedFromID)
 
-	// No body for cache hits
-	assert.Empty(t, bs.allEntries())
+	// Cache hits write a headers-only body entry (no payload, but headers still
+	// need to be retrievable from the JSONL file).
+	allBodies := bs.allEntries()
+	require.Len(t, allBodies, 1)
+	assert.Empty(t, allBodies[0].RequestBody)
+	assert.Empty(t, allBodies[0].ResponseBody)
 }
 
 func TestLoggingMiddleware_PIIEndpoint(t *testing.T) {
@@ -131,7 +135,7 @@ func TestLoggingMiddleware_PIIEndpoint(t *testing.T) {
 }
 
 func TestLoggingMiddleware_RedactsRequestHeaders(t *testing.T) {
-	logger, ms, _ := setupTestLogger(t)
+	logger, _, bs := setupTestLogger(t)
 	registry := pii.NewRegistry()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -150,10 +154,10 @@ func TestLoggingMiddleware_RedactsRequestHeaders(t *testing.T) {
 
 	logger.Close()
 
-	allMeta := ms.allEntries()
-	require.Len(t, allMeta, 1)
-	assert.Equal(t, "[REDACTED]", allMeta[0].RequestHeaders["Authorization"])
-	assert.Equal(t, "visible", allMeta[0].RequestHeaders["X-Custom"])
+	allBodies := bs.allEntries()
+	require.Len(t, allBodies, 1)
+	assert.Equal(t, "[REDACTED]", allBodies[0].RequestHeaders["Authorization"])
+	assert.Equal(t, "visible", allBodies[0].RequestHeaders["X-Custom"])
 }
 
 func TestLoggingMiddleware_SetsRequestIDInContext(t *testing.T) {

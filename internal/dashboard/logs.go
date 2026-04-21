@@ -148,6 +148,17 @@ func (h *Handler) handleLogByID(w http.ResponseWriter, r *http.Request) {
 
 	hasBody := entry.BodyFile != ""
 
+	// Headers live in the JSONL body entry alongside the payload. Fetch
+	// them if we have a reference; if the body has been evicted the row
+	// will not have one (rotator nullifies on delete).
+	var reqHeaders, respHeaders map[string]string
+	if hasBody {
+		if body, berr := h.bodyStore.Read(r.Context(), entry.BodyFile, entry.BodyOffset, entry.BodyLength); berr == nil {
+			reqHeaders = body.RequestHeaders
+			respHeaders = body.ResponseHeaders
+		}
+	}
+
 	resp := logDetailResponse{
 		ID:                    entry.ID,
 		Timestamp:             entry.Timestamp,
@@ -156,9 +167,9 @@ func (h *Handler) handleLogByID(w http.ResponseWriter, r *http.Request) {
 		Method:                entry.Method,
 		Path:                  entry.Path,
 		QueryParams:           entry.QueryParams,
-		RequestHeaders:        entry.RequestHeaders,
+		RequestHeaders:        reqHeaders,
 		StatusCode:            entry.StatusCode,
-		ResponseHeaders:       entry.ResponseHeaders,
+		ResponseHeaders:       respHeaders,
 		CacheStatus:           entry.CacheStatus,
 		CachedFromID:          entry.CachedFromID,
 		Queued:                entry.Queued,
@@ -180,6 +191,10 @@ func (h *Handler) handleLogByID(w http.ResponseWriter, r *http.Request) {
 			resp.CachedFromStatus = original.StatusCode
 			if original.BodyFile != "" {
 				resp.HasBody = true
+				if body, berr := h.bodyStore.Read(r.Context(), original.BodyFile, original.BodyOffset, original.BodyLength); berr == nil {
+					resp.RequestHeaders = body.RequestHeaders
+					resp.ResponseHeaders = body.ResponseHeaders
+				}
 			}
 		}
 	}

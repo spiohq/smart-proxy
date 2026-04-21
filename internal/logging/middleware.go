@@ -68,6 +68,9 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 			m := merchant.MerchantFromContext(r.Context())
 			cacheStatus := capture.Header().Get("X-SP-Proxy-Cache")
 
+			reqHeaders := headerToMap(pii.RedactHeaders(r.Header))
+			respHeaders := headerToMap(capture.Header())
+
 			meta := &storage.RequestLog{
 				ID:                    requestID,
 				Timestamp:             startTime,
@@ -76,9 +79,7 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 				Method:                r.Method,
 				Path:                  r.URL.Path,
 				QueryParams:           r.URL.RawQuery,
-				RequestHeaders:        headerToMap(pii.RedactHeaders(r.Header)),
 				StatusCode:            capture.StatusCode(),
-				ResponseHeaders:       headerToMap(capture.Header()),
 				CacheStatus:           cacheStatus,
 				TotalLatencyMs:        totalLatency,
 				RequestContentLength:  r.ContentLength,
@@ -112,24 +113,29 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 			entry := &LogEntry{Meta: meta}
 
 			if cacheStatus == "HIT" {
-				// Cache hit  -  no body, just reference to original
+				// Cache hit: no body, just reference to original. Headers still go
+				// into a BodyEntry so they can be retrieved from JSONL alongside the
+				// original response's payload.
 				meta.CachedFromID = capture.Header().Get("X-SP-Proxy-Cache-Source-ID")
+				entry.Body = &bodies.BodyEntry{
+					ID:              requestID,
+					RequestHeaders:  reqHeaders,
+					ResponseHeaders: respHeaders,
+				}
 			} else {
-				// Cache miss/bypass/pii_excluded  -  capture body
-				var bodyEntry *bodies.BodyEntry
 				responseBody := decompressIfGzip(capture.CapturedBody(), capture.Header())
-
-				if len(responseBody) > 0 || len(requestBody) > 0 {
-					bodyEntry = &bodies.BodyEntry{ID: requestID}
-					if len(responseBody) > 0 {
-						bodyEntry.ResponseBody = json.RawMessage(responseBody)
-					}
-					if len(requestBody) > 0 {
-						bodyEntry.RequestBody = json.RawMessage(requestBody)
-					}
+				bodyEntry := &bodies.BodyEntry{
+					ID:              requestID,
+					RequestHeaders:  reqHeaders,
+					ResponseHeaders: respHeaders,
+				}
+				if len(responseBody) > 0 {
+					bodyEntry.ResponseBody = json.RawMessage(responseBody)
+				}
+				if len(requestBody) > 0 {
+					bodyEntry.RequestBody = json.RawMessage(requestBody)
 				}
 
-				// Check PII
 				if piiRegistry.ContainsPII(r) {
 					meta.PIIRedacted = true
 				}
