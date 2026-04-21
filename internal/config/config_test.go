@@ -159,6 +159,16 @@ func TestLoad_BodiesDefaults(t *testing.T) {
 	assert.Equal(t, "720h", cfg.Bodies.ArchiveMaxAge)
 	assert.Equal(t, "zstd", cfg.Bodies.Compression)
 	assert.Equal(t, int64(256*1024), cfg.Bodies.MaxCaptureSize)
+	assert.Equal(t, int64(8*1024*1024*1024), cfg.Bodies.MaxBytes)
+}
+
+func TestValidate_BodiesMaxBytesNegative(t *testing.T) {
+	cfg := Load()
+	cfg.Bodies.Enabled = true
+	cfg.Bodies.MaxBytes = -1
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "MAX_BYTES")
 }
 
 func TestValidate_BodiesMaxCaptureSize(t *testing.T) {

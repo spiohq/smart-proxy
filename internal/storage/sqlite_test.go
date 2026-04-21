@@ -389,3 +389,50 @@ func TestSQLiteStore_DistinctMerchants(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, merchants, 1)
 }
+
+func TestSQLiteStore_NullifyBodyRefs(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	a := testRequestLog("req-a", "m")
+	a.BodyFile = "2026-04-20-10.jsonl"
+	a.BodyOffset = 100
+	a.BodyLength = 200
+	b := testRequestLog("req-b", "m")
+	b.BodyFile = "2026-04-20-11.jsonl"
+	b.BodyOffset = 300
+	b.BodyLength = 400
+	c := testRequestLog("req-c", "m")
+	c.BodyFile = "2026-04-20-12.jsonl"
+	c.BodyOffset = 500
+	c.BodyLength = 600
+	require.NoError(t, store.LogRequestBatch(ctx, []*RequestLog{a, b, c}))
+
+	n, err := store.NullifyBodyRefs(ctx, []string{"2026-04-20-10.jsonl", "2026-04-20-12.jsonl"})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), n)
+
+	got, err := store.QueryByID(ctx, "req-a")
+	require.NoError(t, err)
+	assert.Equal(t, "", got.BodyFile)
+	assert.Equal(t, int64(0), got.BodyOffset)
+	assert.Equal(t, 0, got.BodyLength)
+
+	got, err = store.QueryByID(ctx, "req-b")
+	require.NoError(t, err)
+	assert.Equal(t, "2026-04-20-11.jsonl", got.BodyFile)
+	assert.Equal(t, int64(300), got.BodyOffset)
+	assert.Equal(t, 400, got.BodyLength)
+
+	got, err = store.QueryByID(ctx, "req-c")
+	require.NoError(t, err)
+	assert.Equal(t, "", got.BodyFile)
+}
+
+func TestSQLiteStore_NullifyBodyRefs_EmptyNoOp(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	n, err := store.NullifyBodyRefs(ctx, nil)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), n)
+}

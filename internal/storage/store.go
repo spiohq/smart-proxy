@@ -18,6 +18,13 @@ type Store interface {
 	// Returns the number of rows deleted.
 	PurgeOlderThan(ctx context.Context, age time.Duration) (int64, error)
 
+	// NullifyBodyRefs clears body_file/body_offset/body_length on any row
+	// that points at one of the supplied filenames. Used by the body
+	// rotator after it deletes an object, so metadata no longer advertises
+	// references to bodies that are gone. Returns the number of rows
+	// updated.
+	NullifyBodyRefs(ctx context.Context, files []string) (int64, error)
+
 	// QueryByTimeRange returns request logs within the given time range [from, to).
 	QueryByTimeRange(ctx context.Context, from, to time.Time) ([]*RequestLog, error)
 

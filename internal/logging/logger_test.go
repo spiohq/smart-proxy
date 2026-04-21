@@ -37,6 +37,9 @@ func (m *mockStore) LogRequestBatch(ctx context.Context, entries []*storage.Requ
 func (m *mockStore) PurgeOlderThan(ctx context.Context, age time.Duration) (int64, error) {
 	return 0, nil
 }
+func (m *mockStore) NullifyBodyRefs(ctx context.Context, files []string) (int64, error) {
+	return 0, nil
+}
 func (m *mockStore) QueryByTimeRange(ctx context.Context, from, to time.Time) ([]*storage.RequestLog, error) {
 	return nil, nil
 }

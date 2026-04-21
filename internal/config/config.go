@@ -43,6 +43,7 @@ type BodiesConfig struct {
 	ArchiveMaxAge  string // Duration string, e.g. "720h" (30 days)
 	Compression    string // Codec for archive tier: "zstd" (default), "gzip", "none"
 	MaxCaptureSize int64  // Per-message byte cap for request/response bodies
+	MaxBytes       int64  // Hard cap across current/+recent/+archive/; 0 disables eviction
 }
 
 // PurgeConfig holds purge/retention settings for background jobs.
@@ -144,6 +145,7 @@ func loadConfig(logger *slog.Logger) *Config {
 			ArchiveMaxAge:  envStr("SP_PROXY_BODIES_ARCHIVE_MAX_AGE", "720h"),
 			Compression:    envStr("SP_PROXY_BODIES_COMPRESSION", "zstd"),
 			MaxCaptureSize: iInt64("SP_PROXY_BODIES_MAX_CAPTURE_SIZE", 256*1024),
+			MaxBytes:       iInt64("SP_PROXY_BODIES_MAX_BYTES", 8*1024*1024*1024),
 		},
 		Purge: PurgeConfig{
 			MetadataRetention: envStr("SP_PROXY_PURGE_METADATA_RETENTION", "720h"),
@@ -313,6 +315,9 @@ func (c *Config) Validate() error {
 		}
 		if c.Bodies.MaxCaptureSize <= 0 {
 			return fmt.Errorf("SP_PROXY_BODIES_MAX_CAPTURE_SIZE must be positive, got %d", c.Bodies.MaxCaptureSize)
+		}
+		if c.Bodies.MaxBytes < 0 {
+			return fmt.Errorf("SP_PROXY_BODIES_MAX_BYTES cannot be negative, got %d", c.Bodies.MaxBytes)
 		}
 	}
 	for _, d := range []struct{ name, val string }{

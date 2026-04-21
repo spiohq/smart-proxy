@@ -115,9 +115,11 @@ func main() {
 		}
 		currentDir := filepath.Join(cfg.Bodies.BasePath, "current")
 		rotator := bodies.NewRotator(rotatorBackend, currentDir, bodies.RotatorOptions{
-			Codec:         codec,
-			RecentMaxAge:  recentMaxAge,
-			ArchiveMaxAge: archiveMaxAge,
+			Codec:          codec,
+			RecentMaxAge:   recentMaxAge,
+			ArchiveMaxAge:  archiveMaxAge,
+			MaxBytes:       cfg.Bodies.MaxBytes,
+			OrphanNotifier: storeOrphanNotifier{store: metaStore},
 		})
 		go rotator.Run(ctx)
 	}
@@ -239,4 +241,21 @@ func main() {
 		slog.Error("server error", "error", err)
 		os.Exit(1)
 	}
+}
+
+// storeOrphanNotifier adapts a storage.Store to bodies.OrphanNotifier so the
+// rotator can null dangling body pointers when it deletes objects.
+type storeOrphanNotifier struct {
+	store storage.Store
+}
+
+func (s storeOrphanNotifier) OnBodiesDeleted(ctx context.Context, files []string) error {
+	n, err := s.store.NullifyBodyRefs(ctx, files)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		slog.Info("rotator: nulled body refs", "count", n, "files", len(files))
+	}
+	return nil
 }

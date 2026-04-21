@@ -115,6 +115,30 @@ func (s *SQLiteStore) PurgeOlderThan(ctx context.Context, age time.Duration) (in
 	return result.RowsAffected()
 }
 
+// NullifyBodyRefs clears body pointers for rows whose body_file matches any
+// of the supplied filenames. The filter is built as a single IN (...) clause
+// so it stays a single round-trip regardless of slice size.
+func (s *SQLiteStore) NullifyBodyRefs(ctx context.Context, files []string) (int64, error) {
+	if len(files) == 0 {
+		return 0, nil
+	}
+	placeholders := strings.Repeat("?,", len(files))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, 0, len(files))
+	for _, f := range files {
+		args = append(args, f)
+	}
+	query := fmt.Sprintf(
+		"UPDATE request_logs SET body_file = '', body_offset = 0, body_length = 0 WHERE body_file IN (%s)",
+		placeholders,
+	)
+	result, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("nullify body refs: %w", err)
+	}
+	return result.RowsAffected()
+}
+
 func marshalHeaders(h map[string]string) string {
 	if len(h) == 0 {
 		return "{}"
