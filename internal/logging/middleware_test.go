@@ -38,7 +38,7 @@ func TestLoggingMiddleware_BasicCapture(t *testing.T) {
 		w.Write([]byte(`{"data":"test"}`))
 	})
 
-	mw := LoggingMiddleware(logger, registry, "eu")(handler)
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
 
 	req := httptest.NewRequest("GET", "/orders/v0/orders?status=Shipped", nil)
 	req = withMerchant(req, "merchant-a")
@@ -84,7 +84,7 @@ func TestLoggingMiddleware_CacheHit(t *testing.T) {
 		w.Write([]byte(`{"cached":"data"}`))
 	})
 
-	mw := LoggingMiddleware(logger, registry, "na")(handler)
+	mw := LoggingMiddleware(logger, registry, "na", 0)(handler)
 
 	req := httptest.NewRequest("GET", "/catalog/2022-04-01/items/B123", nil)
 	req = withMerchant(req, "merchant-b")
@@ -112,7 +112,7 @@ func TestLoggingMiddleware_PIIEndpoint(t *testing.T) {
 		w.Write([]byte(`{"payload":{"Orders":[{"BuyerInfo":{"BuyerEmail":"secret@test.com"}}]}}`))
 	})
 
-	mw := LoggingMiddleware(logger, registry, "eu")(handler)
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
 
 	req := httptest.NewRequest("GET", "/orders/v0/orders", nil)
 	req = withMerchant(req, "merchant-a")
@@ -138,7 +138,7 @@ func TestLoggingMiddleware_RedactsRequestHeaders(t *testing.T) {
 		w.WriteHeader(200)
 	})
 
-	mw := LoggingMiddleware(logger, registry, "eu")(handler)
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("Authorization", "Bearer secret-token")
@@ -166,7 +166,7 @@ func TestLoggingMiddleware_SetsRequestIDInContext(t *testing.T) {
 		w.WriteHeader(200)
 	})
 
-	mw := LoggingMiddleware(logger, registry, "eu")(handler)
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req = withMerchant(req, "merchant-a")
@@ -190,7 +190,7 @@ func TestLoggingMiddleware_QueuedRequest(t *testing.T) {
 		w.WriteHeader(200)
 	})
 
-	mw := LoggingMiddleware(logger, registry, "eu")(handler)
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req = withMerchant(req, "merchant-a")
@@ -216,7 +216,7 @@ func TestLoggingMiddleware_ClientDisconnected_NotLogged(t *testing.T) {
 		w.Write([]byte(`{"errors":[{"code":"PROXY_ERROR","message":"upstream unavailable","detail":"client_disconnected"}]}`))
 	})
 
-	mw := LoggingMiddleware(logger, registry, "eu")(handler)
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
 
 	req := httptest.NewRequest("POST", "/batches/products/pricing/v0/listingOffers", nil)
 	req = withMerchant(req, "merchant-a")
@@ -247,7 +247,7 @@ func TestLoggingMiddleware_MerchantResolverBeforeLogger(t *testing.T) {
 
 	// Build middleware chain: resolver outermost, then logger, then handler
 	resolver := merchant.NewResolver(nil)
-	chain := resolver.Middleware()(LoggingMiddleware(logger, registry, "eu")(handler))
+	chain := resolver.Middleware()(LoggingMiddleware(logger, registry, "eu", 0)(handler))
 
 	req := httptest.NewRequest("GET", "/orders/v0/orders", nil)
 	req.Header.Set("X-SP-Proxy-Merchant-Id", "SELLER_TEST_123")
@@ -275,7 +275,7 @@ func TestLoggingMiddleware_MerchantFallbackToTokenHash(t *testing.T) {
 	})
 
 	resolver := merchant.NewResolver(nil)
-	chain := resolver.Middleware()(LoggingMiddleware(logger, registry, "eu")(handler))
+	chain := resolver.Middleware()(LoggingMiddleware(logger, registry, "eu", 0)(handler))
 
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("X-Amz-Access-Token", "Atza|some-token")

@@ -219,7 +219,7 @@ func main() {
 				http.Error(w, "proxy misconfigured", http.StatusInternalServerError)
 			})
 		}
-		logMiddleware := logging.LoggingMiddleware(asyncLogger, registry, string(region))
+		logMiddleware := logging.LoggingMiddleware(asyncLogger, registry, string(region), cfg.Bodies.MaxCaptureSize)
 		rdtMw := rdtMiddlewareFn(region)
 		middlewares := []proxy.Middleware{resolver.Middleware(), logMiddleware, rdtMw, cacheMiddleware, rlMiddleware}
 		if promMetrics != nil {

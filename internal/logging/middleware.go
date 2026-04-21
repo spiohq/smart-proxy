@@ -17,12 +17,20 @@ import (
 	"github.com/spiohq/smart-proxy/internal/storage"
 )
 
-const maxCaptureSize = 1 << 20 // 1MB
+// DefaultMaxCaptureSize is the per-message byte cap used when LoggingMiddleware
+// is constructed without an explicit size (e.g. tests). Matches the config
+// default of 256 KiB.
+const DefaultMaxCaptureSize = 256 * 1024
 
 // LoggingMiddleware returns a middleware that captures request/response data
 // and sends it to the AsyncLogger for non-blocking storage.
 // region is the SP-API region this handler serves (e.g., "eu", "na", "fe").
-func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region string) func(http.Handler) http.Handler {
+// maxCaptureSize caps the per-message body bytes retained for logging; values
+// <= 0 fall back to DefaultMaxCaptureSize.
+func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region string, maxCaptureSize int64) func(http.Handler) http.Handler {
+	if maxCaptureSize <= 0 {
+		maxCaptureSize = DefaultMaxCaptureSize
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			startTime := time.Now().UTC()
@@ -33,7 +41,7 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 			r = r.WithContext(ctx)
 
 			// Wrap response writer to capture status + body
-			capture := NewResponseCapture(w, maxCaptureSize)
+			capture := NewResponseCapture(w, int(maxCaptureSize))
 
 			// Capture request body for mutations (POST/PUT/PATCH)
 			var requestBody []byte

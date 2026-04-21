@@ -182,7 +182,7 @@ func NewTestEnv(t *testing.T, opts ...Option) *TestEnv {
 
 	factory := func(region server.Region) http.Handler {
 		rp := proxy.NewTestProxyWithLimiter(mockHost, limiter)
-		logMiddleware := logging.LoggingMiddleware(asyncLogger, registry, string(region))
+		logMiddleware := logging.LoggingMiddleware(asyncLogger, registry, string(region), 0)
 		return proxy.BuildChain(rp, resolver.Middleware(), logMiddleware, rdtMiddleware, cacheMiddleware, rlMiddleware)
 	}
 

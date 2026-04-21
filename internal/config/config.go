@@ -37,11 +37,12 @@ type StorageConfig struct {
 
 // BodiesConfig holds request/response body storage settings.
 type BodiesConfig struct {
-	Enabled       bool
-	BasePath      string // Base directory for body files
-	RecentMaxAge  string // Duration string, e.g. "72h"
-	ArchiveMaxAge string // Duration string, e.g. "8760h" (365 days)
-	Compression   string // Codec for archive tier: "zstd" (default), "gzip", "none"
+	Enabled        bool
+	BasePath       string // Base directory for body files
+	RecentMaxAge   string // Duration string, e.g. "24h"
+	ArchiveMaxAge  string // Duration string, e.g. "720h" (30 days)
+	Compression    string // Codec for archive tier: "zstd" (default), "gzip", "none"
+	MaxCaptureSize int64  // Per-message byte cap for request/response bodies
 }
 
 // PurgeConfig holds purge/retention settings for background jobs.
@@ -137,11 +138,12 @@ func loadConfig(logger *slog.Logger) *Config {
 			SQLitePath: envStr("SP_PROXY_SQLITE_PATH", "/data/sp-proxy.db"),
 		},
 		Bodies: BodiesConfig{
-			Enabled:       iBool("SP_PROXY_BODIES_ENABLED", true),
-			BasePath:      envStr("SP_PROXY_BODIES_PATH", "/data/bodies"),
-			RecentMaxAge:  envStr("SP_PROXY_BODIES_RECENT_MAX_AGE", "72h"),
-			ArchiveMaxAge: envStr("SP_PROXY_BODIES_ARCHIVE_MAX_AGE", "8760h"),
-			Compression:   envStr("SP_PROXY_BODIES_COMPRESSION", "zstd"),
+			Enabled:        iBool("SP_PROXY_BODIES_ENABLED", true),
+			BasePath:       envStr("SP_PROXY_BODIES_PATH", "/data/bodies"),
+			RecentMaxAge:   envStr("SP_PROXY_BODIES_RECENT_MAX_AGE", "24h"),
+			ArchiveMaxAge:  envStr("SP_PROXY_BODIES_ARCHIVE_MAX_AGE", "720h"),
+			Compression:    envStr("SP_PROXY_BODIES_COMPRESSION", "zstd"),
+			MaxCaptureSize: iInt64("SP_PROXY_BODIES_MAX_CAPTURE_SIZE", 256*1024),
 		},
 		Purge: PurgeConfig{
 			MetadataRetention: envStr("SP_PROXY_PURGE_METADATA_RETENTION", "720h"),
@@ -308,6 +310,9 @@ func (c *Config) Validate() error {
 		case "", "zstd", "gzip", "none":
 		default:
 			return fmt.Errorf("invalid SP_PROXY_BODIES_COMPRESSION %q (want zstd|gzip|none)", c.Bodies.Compression)
+		}
+		if c.Bodies.MaxCaptureSize <= 0 {
+			return fmt.Errorf("SP_PROXY_BODIES_MAX_CAPTURE_SIZE must be positive, got %d", c.Bodies.MaxCaptureSize)
 		}
 	}
 	for _, d := range []struct{ name, val string }{
