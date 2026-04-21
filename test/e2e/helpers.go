@@ -97,7 +97,7 @@ func NewTestEnv(t *testing.T, opts ...Option) *TestEnv {
 	require.NoError(t, err)
 
 	bodyDir := t.TempDir()
-	bodyStore, err := bodies.NewStore(bodyDir)
+	bodyStore, err := bodies.NewLocalStore(bodyDir)
 	require.NoError(t, err)
 
 	cfg := &config.Config{
