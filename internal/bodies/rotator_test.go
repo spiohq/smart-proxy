@@ -25,7 +25,10 @@ func newTestRotator(t *testing.T, recentMaxAge, archiveMaxAge time.Duration) (st
 	backend, err := blob.NewLocal(dir)
 	require.NoError(t, err)
 	t.Cleanup(func() { backend.Close() })
-	return currentDir, backend, NewRotator(backend, currentDir, recentMaxAge, archiveMaxAge)
+	return currentDir, backend, NewRotator(backend, currentDir, RotatorOptions{
+		RecentMaxAge:  recentMaxAge,
+		ArchiveMaxAge: archiveMaxAge,
+	})
 }
 
 func writeTestJSONL(t *testing.T, path string) {
@@ -99,6 +102,48 @@ func TestRotator_CompressToArchive(t *testing.T) {
 	decoded, err := io.ReadAll(dec)
 	require.NoError(t, err)
 	assert.Equal(t, line, decoded)
+}
+
+func TestRotator_CompressWithGzipCodec(t *testing.T) {
+	dir := t.TempDir()
+	currentDir := filepath.Join(dir, "current")
+	require.NoError(t, os.MkdirAll(currentDir, 0o755))
+	backend, err := blob.NewLocal(dir)
+	require.NoError(t, err)
+	defer backend.Close()
+
+	gzCodec, err := NewCodec("gzip")
+	require.NoError(t, err)
+	rot := NewRotator(backend, currentDir, RotatorOptions{
+		Codec:         gzCodec,
+		RecentMaxAge:  72 * time.Hour,
+		ArchiveMaxAge: 8760 * time.Hour,
+	})
+
+	ctx := context.Background()
+	name := "2026-03-20-10.jsonl"
+	entry := &BodyEntry{ID: "gz", ResponseBody: json.RawMessage(`{"x":1}`)}
+	line, _ := json.Marshal(entry)
+	line = append(line, '\n')
+
+	require.NoError(t, backend.Put(ctx, "recent/"+name, bytes.NewReader(line), int64(len(line))))
+	backingPath := filepath.Join(backend.Root(), "recent", name)
+	oldTime := time.Now().Add(-96 * time.Hour)
+	require.NoError(t, os.Chtimes(backingPath, oldTime, oldTime))
+
+	require.NoError(t, rot.RunOnce(ctx))
+
+	// Archive must use .gz extension, not .zst.
+	_, err = backend.Stat(ctx, "archive/"+name+".gz")
+	require.NoError(t, err)
+	_, err = backend.Stat(ctx, "archive/"+name+".zst")
+	assert.Error(t, err)
+
+	// And the Reader can still read it via extension sniffing.
+	reader := NewReader(backend, currentDir)
+	result, err := reader.Read(ctx, name, 0, len(line))
+	require.NoError(t, err)
+	assert.Equal(t, "gz", result.ID)
 }
 
 func TestRotator_PurgeExpiredArchives(t *testing.T) {

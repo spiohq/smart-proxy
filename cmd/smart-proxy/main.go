@@ -98,19 +98,27 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Body rotator (background). Uses the same blob.Backend as the body
-	// store; a separate backend instance is fine here because local-FS
-	// backends are stateless across instances.
+	// Body rotator (background). Uses a separate blob.Backend instance;
+	// local-FS backends are stateless across instances.
 	if cfg.Bodies.Enabled {
 		recentMaxAge, _ := time.ParseDuration(cfg.Bodies.RecentMaxAge)
 		archiveMaxAge, _ := time.ParseDuration(cfg.Bodies.ArchiveMaxAge)
+		codec, err := bodies.NewCodec(cfg.Bodies.Compression)
+		if err != nil {
+			slog.Error("invalid bodies compression codec", "error", err)
+			os.Exit(1)
+		}
 		rotatorBackend, err := blob.NewLocal(cfg.Bodies.BasePath)
 		if err != nil {
 			slog.Error("failed to create rotator backend", "error", err)
 			os.Exit(1)
 		}
 		currentDir := filepath.Join(cfg.Bodies.BasePath, "current")
-		rotator := bodies.NewRotator(rotatorBackend, currentDir, recentMaxAge, archiveMaxAge)
+		rotator := bodies.NewRotator(rotatorBackend, currentDir, bodies.RotatorOptions{
+			Codec:         codec,
+			RecentMaxAge:  recentMaxAge,
+			ArchiveMaxAge: archiveMaxAge,
+		})
 		go rotator.Run(ctx)
 	}
 

@@ -10,13 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/klauspost/compress/zstd"
 	"github.com/spiohq/smart-proxy/internal/blob"
 )
 
 // Reader retrieves previously-written body entries. The active hour lives on
 // the local filesystem (currentDir); older tiers (recent/, archive/) are
-// served from the configured backend.
+// served from the configured backend. Archive objects are decompressed
+// based on their filename suffix (.zst, .gz, or uncompressed).
 type Reader struct {
 	backend    blob.Backend
 	currentDir string
@@ -29,23 +29,23 @@ func NewReader(backend blob.Backend, currentDir string) *Reader {
 
 // Read retrieves a body entry identified by (file, offset, length).
 //
-// file is the filename portion only (e.g. "2026-04-20-17.jsonl" or
-// "2026-04-20-17.jsonl.zst"); the reader probes current/, recent/, and
-// archive/ until it finds a match. offset and length are byte coordinates
-// into the uncompressed JSONL stream.
+// file is the filename portion only (e.g. "2026-04-20-17.jsonl",
+// "2026-04-20-17.jsonl.zst", or "2026-04-20-17.jsonl.gz"); the reader
+// probes current/, recent/, and archive/ until it finds a match. offset
+// and length are byte coordinates into the uncompressed JSONL stream.
 func (r *Reader) Read(ctx context.Context, file string, offset int64, length int) (*BodyEntry, error) {
 	if filepath.Base(file) != file {
 		return nil, fmt.Errorf("invalid body file name: %s", file)
 	}
 
-	// 1. current/ (always local, always uncompressed)
+	// 1. current/ (always local, always uncompressed).
 	localPath := filepath.Join(r.currentDir, file)
 	if _, err := os.Stat(localPath); err == nil {
 		return readDirect(localPath, offset, length)
 	}
 
-	// 2. recent/ (backend, uncompressed)
-	if !strings.HasSuffix(file, ".zst") {
+	// 2. recent/ (backend, uncompressed).
+	if codecFromSuffix(file) == nil {
 		key := "recent/" + file
 		if entry, err := readFromBackendRange(ctx, r.backend, key, offset, length); err == nil {
 			return entry, nil
@@ -54,21 +54,46 @@ func (r *Reader) Read(ctx context.Context, file string, offset int64, length int
 		}
 	}
 
-	// 3. archive/ (backend, zstd-compressed). Accept both bare and .zst
-	// suffixed inputs to ease callers that don't know which tier they
-	// stored into.
-	archiveKey := "archive/" + file
-	if !strings.HasSuffix(archiveKey, ".zst") {
-		archiveKey += ".zst"
+	// 3. archive/ (backend). Try the explicit filename first, then any
+	// known codec extension. This lets callers that stored
+	// body_file="2026-04-20.jsonl" still resolve after promotion renamed
+	// the object to "2026-04-20.jsonl.zst" or ".gz".
+	candidates := []string{"archive/" + file}
+	if codecFromSuffix(file) == nil {
+		candidates = append(candidates, "archive/"+file+".zst", "archive/"+file+".gz")
 	}
-	entry, err := readFromBackendCompressed(ctx, r.backend, archiveKey, offset, length)
-	if err == nil {
-		return entry, nil
+	for _, key := range candidates {
+		codec := codecFromSuffix(key)
+		var entry *BodyEntry
+		var err error
+		if codec == nil {
+			entry, err = readFromBackendRange(ctx, r.backend, key, offset, length)
+		} else {
+			entry, err = readFromBackendCompressed(ctx, r.backend, key, codec, offset, length)
+		}
+		if err == nil {
+			return entry, nil
+		}
+		if !errors.Is(err, blob.ErrNotFound) {
+			return nil, err
+		}
 	}
-	if errors.Is(err, blob.ErrNotFound) {
-		return nil, fmt.Errorf("body file not found: %s", file)
+	return nil, fmt.Errorf("body file not found: %s", file)
+}
+
+// codecFromSuffix returns a decoder for the given key's extension, or nil
+// if the key is uncompressed.
+func codecFromSuffix(key string) Codec {
+	switch {
+	case strings.HasSuffix(key, ".zst"):
+		c, _ := NewCodec("zstd")
+		return c
+	case strings.HasSuffix(key, ".gz"):
+		c, _ := NewCodec("gzip")
+		return c
+	default:
+		return nil
 	}
-	return nil, err
 }
 
 func readDirect(path string, offset int64, length int) (*BodyEntry, error) {
@@ -106,16 +131,16 @@ func readFromBackendRange(ctx context.Context, b blob.Backend, key string, offse
 	return &entry, nil
 }
 
-func readFromBackendCompressed(ctx context.Context, b blob.Backend, key string, offset int64, length int) (*BodyEntry, error) {
+func readFromBackendCompressed(ctx context.Context, b blob.Backend, key string, codec Codec, offset int64, length int) (*BodyEntry, error) {
 	rc, err := b.Get(ctx, key, 0, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer rc.Close()
 
-	dec, err := zstd.NewReader(rc)
+	dec, err := codec.NewReader(rc)
 	if err != nil {
-		return nil, fmt.Errorf("zstd reader %s: %w", key, err)
+		return nil, fmt.Errorf("%s reader %s: %w", codec.Name(), key, err)
 	}
 	defer dec.Close()
 

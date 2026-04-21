@@ -41,6 +41,7 @@ type BodiesConfig struct {
 	BasePath      string // Base directory for body files
 	RecentMaxAge  string // Duration string, e.g. "72h"
 	ArchiveMaxAge string // Duration string, e.g. "8760h" (365 days)
+	Compression   string // Codec for archive tier: "zstd" (default), "gzip", "none"
 }
 
 // PurgeConfig holds purge/retention settings for background jobs.
@@ -140,6 +141,7 @@ func loadConfig(logger *slog.Logger) *Config {
 			BasePath:      envStr("SP_PROXY_BODIES_PATH", "/data/bodies"),
 			RecentMaxAge:  envStr("SP_PROXY_BODIES_RECENT_MAX_AGE", "72h"),
 			ArchiveMaxAge: envStr("SP_PROXY_BODIES_ARCHIVE_MAX_AGE", "8760h"),
+			Compression:   envStr("SP_PROXY_BODIES_COMPRESSION", "zstd"),
 		},
 		Purge: PurgeConfig{
 			MetadataRetention: envStr("SP_PROXY_PURGE_METADATA_RETENTION", "720h"),
@@ -301,6 +303,11 @@ func (c *Config) Validate() error {
 		}
 		if err := validatePositiveDuration("SP_PROXY_BODIES_ARCHIVE_MAX_AGE", c.Bodies.ArchiveMaxAge); err != nil {
 			return fmt.Errorf("invalid bodies archive max age %q: %w", c.Bodies.ArchiveMaxAge, err)
+		}
+		switch c.Bodies.Compression {
+		case "", "zstd", "gzip", "none":
+		default:
+			return fmt.Errorf("invalid SP_PROXY_BODIES_COMPRESSION %q (want zstd|gzip|none)", c.Bodies.Compression)
 		}
 	}
 	for _, d := range []struct{ name, val string }{

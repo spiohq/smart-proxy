@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/klauspost/compress/zstd"
 	"github.com/spiohq/smart-proxy/internal/blob"
 )
 
@@ -26,22 +25,35 @@ import (
 // S3 backend ships both tiers off the node.
 type Rotator struct {
 	backend       blob.Backend
+	codec         Codec
 	currentDir    string
 	recentMaxAge  time.Duration
 	archiveMaxAge time.Duration
 }
 
+// RotatorOptions configures NewRotator. Fields left at their zero value
+// receive sensible defaults (zstd codec).
+type RotatorOptions struct {
+	Codec         Codec
+	RecentMaxAge  time.Duration
+	ArchiveMaxAge time.Duration
+}
+
 // NewRotator creates a body rotator.
 //   - backend: object store for recent/ and archive/ keys.
 //   - currentDir: local filesystem directory holding the active hourly file.
-//   - recentMaxAge: age at which a recent/ object is compressed to archive/.
-//   - archiveMaxAge: age at which an archive/ object is deleted.
-func NewRotator(backend blob.Backend, currentDir string, recentMaxAge, archiveMaxAge time.Duration) *Rotator {
+//   - opts: compression codec and retention windows.
+func NewRotator(backend blob.Backend, currentDir string, opts RotatorOptions) *Rotator {
+	codec := opts.Codec
+	if codec == nil {
+		codec, _ = NewCodec("zstd")
+	}
 	return &Rotator{
 		backend:       backend,
+		codec:         codec,
 		currentDir:    currentDir,
-		recentMaxAge:  recentMaxAge,
-		archiveMaxAge: archiveMaxAge,
+		recentMaxAge:  opts.RecentMaxAge,
+		archiveMaxAge: opts.ArchiveMaxAge,
 	}
 }
 
@@ -138,7 +150,7 @@ func (r *Rotator) compressToArchive(ctx context.Context) error {
 			continue
 		}
 		name := strings.TrimPrefix(obj.Key, "recent/")
-		archiveKey := "archive/" + name + ".zst"
+		archiveKey := "archive/" + name + r.codec.Extension()
 		if err := r.compressObject(ctx, obj.Key, archiveKey); err != nil {
 			return fmt.Errorf("compress %s: %w", obj.Key, err)
 		}
@@ -149,8 +161,8 @@ func (r *Rotator) compressToArchive(ctx context.Context) error {
 	return nil
 }
 
-// compressObject streams src through zstd and writes the result to dst on
-// the same backend.
+// compressObject streams src through the configured codec and writes the
+// result to dst on the same backend.
 func (r *Rotator) compressObject(ctx context.Context, srcKey, dstKey string) error {
 	src, err := r.backend.Get(ctx, srcKey, 0, 0)
 	if err != nil {
@@ -159,10 +171,10 @@ func (r *Rotator) compressObject(ctx context.Context, srcKey, dstKey string) err
 	defer src.Close()
 
 	pr, pw := io.Pipe()
-	enc, err := zstd.NewWriter(pw)
+	enc, err := r.codec.NewWriter(pw)
 	if err != nil {
 		pw.Close()
-		return fmt.Errorf("zstd writer: %w", err)
+		return fmt.Errorf("codec writer: %w", err)
 	}
 	errCh := make(chan error, 1)
 	go func() {
