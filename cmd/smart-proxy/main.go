@@ -83,7 +83,13 @@ func main() {
 	}
 	defer metaStore.Close()
 
-	bodyStore, err := bodies.NewLocalStore(cfg.Bodies.BasePath)
+	currentDir := filepath.Join(cfg.Bodies.BasePath, "current")
+	bodyBackend, err := newBodyBackend(context.Background(), cfg)
+	if err != nil {
+		slog.Error("failed to create body backend", "error", err)
+		os.Exit(1)
+	}
+	bodyStore, err := bodies.NewStore(bodyBackend, currentDir)
 	if err != nil {
 		slog.Error("failed to create body store", "error", err)
 		os.Exit(1)
@@ -98,8 +104,8 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Body rotator (background). Uses a separate blob.Backend instance;
-	// local-FS backends are stateless across instances.
+	// Body rotator (background). Reuses the body store's backend so both
+	// see the same object inventory; local and S3 backends are safely shared.
 	if cfg.Bodies.Enabled {
 		recentMaxAge, _ := time.ParseDuration(cfg.Bodies.RecentMaxAge)
 		archiveMaxAge, _ := time.ParseDuration(cfg.Bodies.ArchiveMaxAge)
@@ -108,13 +114,7 @@ func main() {
 			slog.Error("invalid bodies compression codec", "error", err)
 			os.Exit(1)
 		}
-		rotatorBackend, err := blob.NewLocal(cfg.Bodies.BasePath)
-		if err != nil {
-			slog.Error("failed to create rotator backend", "error", err)
-			os.Exit(1)
-		}
-		currentDir := filepath.Join(cfg.Bodies.BasePath, "current")
-		rotator := bodies.NewRotator(rotatorBackend, currentDir, bodies.RotatorOptions{
+		rotator := bodies.NewRotator(bodyBackend, currentDir, bodies.RotatorOptions{
 			Codec:          codec,
 			RecentMaxAge:   recentMaxAge,
 			ArchiveMaxAge:  archiveMaxAge,
@@ -240,6 +240,26 @@ func main() {
 	if err := srv.Start(); err != nil {
 		slog.Error("server error", "error", err)
 		os.Exit(1)
+	}
+}
+
+// newBodyBackend constructs the blob.Backend selected by
+// SP_PROXY_BODIES_BACKEND. Local is the default; s3 uses the S3Config block.
+func newBodyBackend(ctx context.Context, cfg *config.Config) (blob.Backend, error) {
+	switch cfg.Bodies.Backend {
+	case "", "local":
+		return blob.NewLocal(cfg.Bodies.BasePath)
+	case "s3":
+		return blob.NewS3(ctx, blob.S3Options{
+			Bucket:    cfg.Bodies.S3.Bucket,
+			Region:    cfg.Bodies.S3.Region,
+			Endpoint:  cfg.Bodies.S3.Endpoint,
+			AccessKey: cfg.Bodies.S3.AccessKey,
+			SecretKey: cfg.Bodies.S3.SecretKey,
+			PathStyle: cfg.Bodies.S3.PathStyle,
+		})
+	default:
+		return nil, fmt.Errorf("unsupported bodies backend: %s", cfg.Bodies.Backend)
 	}
 }
 
