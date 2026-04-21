@@ -1,8 +1,10 @@
 package logging
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/spiohq/smart-proxy/internal/cache"
@@ -158,6 +160,40 @@ func TestLoggingMiddleware_RedactsRequestHeaders(t *testing.T) {
 	require.Len(t, allBodies, 1)
 	assert.Equal(t, "[REDACTED]", allBodies[0].RequestHeaders["Authorization"])
 	assert.Equal(t, "visible", allBodies[0].RequestHeaders["X-Custom"])
+}
+
+func TestLoggingMiddleware_CapsCapturedBodies(t *testing.T) {
+	logger, _, bs := setupTestLogger(t)
+	registry := pii.NewRegistry()
+
+	const cap = 64
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(200)
+		w.Write(bytes.Repeat([]byte("A"), 4096))
+	})
+
+	mw := LoggingMiddleware(logger, registry, "eu", cap)(handler)
+
+	reqBody := strings.Repeat("B", 4096)
+	req := httptest.NewRequest("POST", "/test", strings.NewReader(reqBody))
+	req.ContentLength = int64(len(reqBody))
+	req = withMerchant(req, "merchant-a")
+
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	logger.Close()
+
+	allBodies := bs.allEntries()
+	require.Len(t, allBodies, 1)
+	// The request was 4 KiB but the cap was 64 bytes, so the middleware
+	// must not retain the oversized payload.
+	assert.LessOrEqual(t, len(allBodies[0].RequestBody), cap,
+		"request body must be dropped or truncated when ContentLength exceeds cap")
+	assert.LessOrEqual(t, len(allBodies[0].ResponseBody), cap,
+		"response body must be truncated to cap")
 }
 
 func TestLoggingMiddleware_SetsRequestIDInContext(t *testing.T) {

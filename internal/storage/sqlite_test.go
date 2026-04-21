@@ -412,3 +412,28 @@ func TestSQLiteStore_NullifyBodyRefs_EmptyNoOp(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), n)
 }
+
+func TestSQLiteStore_Maintain(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	// Seed, purge, then maintain; the combination exercises incremental_vacuum
+	// against freed pages. We assert the call succeeds and that the store is
+	// still usable afterwards (a broken PRAGMA would leave the DB in a bad state).
+	for i := 0; i < 50; i++ {
+		e := testRequestLog(fmt.Sprintf("m-%03d", i), "merchant-a")
+		e.Timestamp = time.Now().UTC().Add(-48 * time.Hour)
+		require.NoError(t, store.LogRequest(ctx, e))
+	}
+	_, err := store.PurgeOlderThan(ctx, 24*time.Hour)
+	require.NoError(t, err)
+
+	require.NoError(t, store.Maintain(ctx))
+
+	// Store still accepts writes and reads after maintenance.
+	fresh := testRequestLog("fresh", "merchant-a")
+	require.NoError(t, store.LogRequest(ctx, fresh))
+	got, err := store.QueryByID(ctx, "fresh")
+	require.NoError(t, err)
+	require.NotNil(t, got)
+}
