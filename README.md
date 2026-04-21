@@ -260,10 +260,17 @@ again (`archive/`). Headers live next to the payload in the same JSONL entry.
 | `SP_PROXY_BODIES_MAX_CAPTURE_SIZE` | `262144` | Per-message byte cap for captured bodies (256 KiB) |
 | `SP_PROXY_BODIES_MAX_BYTES` | `8589934592` | Hard cap across all tiers (8 GiB); `0` disables size eviction |
 
+> [!TIP]
+> **Quick sizing rules:**
+> - **Dev / CI / single-node**: `BODIES_BACKEND=local` is enough. Set `BODIES_MAX_BYTES` to 60-70% of your volume size so the size evictor wins before the filesystem fills up.
+> - **Production at ~100k+ req/h**: switch to `BODIES_BACKEND=s3`. The local disk only needs to hold the active hour plus staging (figure 2-4 GiB for typical SP-API traffic). Everything older lives on the object store.
+> - **Storage growth surprise**: the active hour is always local. If local disk fills up fast, it's not retention, it's `MAX_CAPTURE_SIZE` times your req/h. Drop the cap before raising the volume.
+> - **DB file not shrinking after purge**: SQLite maintenance runs hourly inside the metadata purge job. If the file still grows, check that the job is actually scheduled (look for `metadata purged` log lines).
+
 ### S3 Backend
 
-Only read when `SP_PROXY_BODIES_BACKEND=s3`. Compatible with AWS S3, MinIO,
-Cloudflare R2, and any other S3-compatible object store.
+Only read when `SP_PROXY_BODIES_BACKEND=s3`. Compatible with AWS S3, Hetzner
+Object Storage, MinIO, Cloudflare R2, and any other S3-compatible object store.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -273,6 +280,15 @@ Cloudflare R2, and any other S3-compatible object store.
 | `SP_PROXY_S3_ACCESS_KEY` | | Access key; if blank, the default AWS credential chain is used |
 | `SP_PROXY_S3_SECRET_KEY` | | Secret key |
 | `SP_PROXY_S3_PATH_STYLE` | `false` | Set `true` for MinIO and some on-prem providers |
+
+> [!TIP]
+> **Per-provider gotchas:**
+> - **AWS S3**: on EC2/EKS/ECS, leave `ACCESS_KEY`/`SECRET_KEY` blank and attach an IAM role instead. `PATH_STYLE=false`.
+> - **Hetzner Object Storage**: set `REGION` to the datacenter code (`fsn1` / `nbg1` / `hel1`) and `ENDPOINT` to `https://<code>.your-objectstorage.com`. `PATH_STYLE=false`.
+> - **MinIO**: `PATH_STYLE=true` is required. `REGION` can be any non-empty value.
+> - **Cloudflare R2**: `REGION=auto`, `ENDPOINT=https://<account_id>.r2.cloudflarestorage.com`, `PATH_STYLE=false`.
+>
+> Full setup walkthroughs, IAM policy, compression tuning, sizing tables, and troubleshooting are in **[docs/STORAGE.md](docs/STORAGE.md)**.
 
 ---
 
@@ -428,6 +444,7 @@ make clean          # Clean build artifacts
 | [Rate Limiting](docs/RATE_LIMITING.md) | Token buckets, per-endpoint defaults, modes |
 | [Auto-RDT](docs/RDT.md) | Automatic RDT minting, caching, report handling |
 | [DPP Compliance](docs/DPP_COMPLIANCE.md) | PII redaction configuration, field mappings |
+| [Storage](docs/STORAGE.md) | Body tiers, retention, S3 / Hetzner / MinIO / R2 setup |
 | [Library Integrations](docs/libraries/) | Guides for popular SP-API client libraries |
 
 ---
