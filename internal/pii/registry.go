@@ -192,10 +192,10 @@ var ConditionalPIIRules = map[string][]FieldRedaction{
 // DefaultFullBodyPIIEndpoints lists endpoint patterns whose entire response body
 // is considered PII and should not be cached.
 var DefaultFullBodyPIIEndpoints = map[string]bool{
-	"/orders/v0/orders/{orderId}/buyerInfo":                true,
-	"/orders/v0/orders/{orderId}/address":                  true,
-	"/orders/v0/orders/{orderId}/orderItems/buyerInfo":     true,
-	"/messaging/v1/orders/{orderId}/messages/{messageId}":  true,
+	"/orders/v0/orders/{orderId}/buyerInfo":               true,
+	"/orders/v0/orders/{orderId}/address":                 true,
+	"/orders/v0/orders/{orderId}/orderItems/buyerInfo":    true,
+	"/messaging/v1/orders/{orderId}/messages/{messageId}": true,
 }
 
 // Registry maps endpoint patterns to PII field redaction rules.
@@ -204,6 +204,7 @@ type Registry struct {
 	conditionalRules  map[string][]FieldRedaction
 	fullBodyEndpoints map[string]bool
 	failClosed        bool
+	queryParamsExtra  map[string]bool
 }
 
 // NewRegistry returns a Registry pre-loaded with the default SP-API PII rules.
@@ -225,8 +226,33 @@ func NewRegistryFailClosed() *Registry {
 	return r
 }
 
+// NewRegistryWithExtras returns a Registry with default rules and an
+// additional set of query-parameter names to treat as PII (in addition to
+// pii.DefaultPIIQueryParams). Names are case-insensitive; they are
+// lower-cased internally so callers do not need to pre-process.
+func NewRegistryWithExtras(extras []string) *Registry {
+	r := NewRegistry()
+	if len(extras) > 0 {
+		r.queryParamsExtra = make(map[string]bool, len(extras))
+		for _, e := range extras {
+			e = strings.TrimSpace(strings.ToLower(e))
+			if e != "" {
+				r.queryParamsExtra[e] = true
+			}
+		}
+	}
+	return r
+}
+
 // FailClosed reports whether the registry treats unknown endpoints as PII.
 func (reg *Registry) FailClosed() bool { return reg.failClosed }
+
+// QueryParamsExtra returns the operator-supplied additional PII query-param
+// names (lower-cased). Returns nil for the default registry. The returned
+// map is the registry's internal state; callers must treat it as read-only.
+func (reg *Registry) QueryParamsExtra() map[string]bool {
+	return reg.queryParamsExtra
+}
 
 // RulesFor returns the PII field redaction rules for the given endpoint pattern.
 // Returns nil (empty slice) if no rules are registered for the pattern.

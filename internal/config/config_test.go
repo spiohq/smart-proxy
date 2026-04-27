@@ -98,6 +98,18 @@ func TestValidate_NegativeDuration(t *testing.T) {
 	assert.Contains(t, err.Error(), "must be positive")
 }
 
+func TestPIIConfig_QueryParamsExtra_Default(t *testing.T) {
+	t.Setenv("SP_PROXY_PII_QUERY_PARAMS", "")
+	cfg := Load()
+	assert.Empty(t, cfg.PII.QueryParamsExtra)
+}
+
+func TestPIIConfig_QueryParamsExtra_FromEnv(t *testing.T) {
+	t.Setenv("SP_PROXY_PII_QUERY_PARAMS", "foo, bar ,baz")
+	cfg := Load()
+	assert.Equal(t, []string{"foo", "bar", "baz"}, cfg.PII.QueryParamsExtra)
+}
+
 func TestValidate_QueueMaxDepthZero(t *testing.T) {
 	cfg := Load()
 	cfg.RateLimit.QueueMaxDepth = 0
@@ -211,9 +223,9 @@ func TestIsProduction_CaseInsensitive(t *testing.T) {
 }
 
 func TestLoad_PIIFailClosedDefault(t *testing.T) {
-	os.Unsetenv("SP_PROXY_PII_FAIL_CLOSED")
+	t.Setenv("SP_PROXY_PII_FAIL_CLOSED", "")
 	cfg := Load()
-	assert.False(t, cfg.PII.FailClosed, "fail-closed must default to false to avoid breaking existing deployments")
+	assert.True(t, cfg.PII.FailClosed, "fail-closed must default to true for DPP compliance")
 }
 
 func TestLoad_PIIFailClosedEnv(t *testing.T) {

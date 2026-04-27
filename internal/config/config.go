@@ -35,7 +35,8 @@ type PIIConfig struct {
 	// FailClosed makes the PII engine treat any path it does not recognize as
 	// PII-bearing. New SP-API endpoints added upstream are then redacted and
 	// excluded from cache by default until the registry is updated.
-	FailClosed bool
+	FailClosed       bool
+	QueryParamsExtra []string // SP_PROXY_PII_QUERY_PARAMS=foo,bar
 }
 
 // StorageConfig holds database storage settings.
@@ -164,7 +165,8 @@ func loadConfig(logger *slog.Logger) *Config {
 			ExcludePII: iBool("SP_PROXY_CACHE_EXCLUDE_PII", true),
 		},
 		PII: PIIConfig{
-			FailClosed: iBool("SP_PROXY_PII_FAIL_CLOSED", false),
+			FailClosed:       iBool("SP_PROXY_PII_FAIL_CLOSED", true),
+			QueryParamsExtra: envStrSlice("SP_PROXY_PII_QUERY_PARAMS"),
 		},
 		Storage: StorageConfig{
 			Backend:    envStr("SP_PROXY_STORAGE_BACKEND", "sqlite"),
@@ -301,6 +303,24 @@ func envBoolLog(logger *slog.Logger, key string, fallback bool) bool {
 		logger.Warn("invalid env var, using default", "key", key, "value", v, "default", fallback)
 	}
 	return fallback
+}
+
+// envStrSlice parses a comma-separated env var into a slice. Empty strings
+// after splitting are dropped. Whitespace around items is trimmed.
+func envStrSlice(key string) []string {
+	v := os.Getenv(key)
+	if v == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func validatePositiveDuration(name, val string) error {

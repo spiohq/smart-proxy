@@ -506,3 +506,16 @@ func TestDocumentURL_RedactionRoundTrip(t *testing.T) {
 	assert.Contains(t, string(redacted), "GZIP")
 }
 
+func TestRegistry_QueryParamsExtra_Default(t *testing.T) {
+	reg := NewRegistry()
+	assert.Empty(t, reg.QueryParamsExtra())
+}
+
+func TestRegistry_QueryParamsExtra_Custom(t *testing.T) {
+	reg := NewRegistryWithExtras([]string{"FooParam", "BarParam"})
+	got := reg.QueryParamsExtra()
+	// Keys must be lower-cased for case-insensitive matching.
+	assert.True(t, got["fooparam"])
+	assert.True(t, got["barparam"])
+	assert.False(t, got["FooParam"])
+}
