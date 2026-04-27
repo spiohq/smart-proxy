@@ -451,3 +451,58 @@ func TestSingleOrderItemsV0_HasFieldRules(t *testing.T) {
 	assert.Contains(t, paths, "$.payload.OrderItems[*].BuyerInfo.GiftMessageText")
 }
 
+func TestDocumentURLs_AreRedacted_Reports(t *testing.T) {
+	reg := NewRegistry()
+	rules := reg.RulesFor("/reports/2021-06-30/documents/{documentId}")
+	assert.NotEmpty(t, rules)
+
+	var paths []string
+	for _, r := range rules {
+		paths = append(paths, r.JSONPath)
+	}
+	assert.Contains(t, paths, "$.url")
+	assert.Contains(t, paths, "$.encryptionDetails.key")
+}
+
+func TestDocumentURLs_AreRedacted_Feeds(t *testing.T) {
+	reg := NewRegistry()
+	rules := reg.RulesFor("/feeds/2021-06-30/documents/{feedDocumentId}")
+	assert.NotEmpty(t, rules)
+
+	var paths []string
+	for _, r := range rules {
+		paths = append(paths, r.JSONPath)
+	}
+	assert.Contains(t, paths, "$.url")
+	assert.Contains(t, paths, "$.encryptionDetails.key")
+}
+
+func TestDocumentURLs_AreRedacted_DataKiosk(t *testing.T) {
+	reg := NewRegistry()
+	rules := reg.RulesFor("/datakiosk/2023-11-15/documents/{documentId}")
+	assert.NotEmpty(t, rules)
+
+	var paths []string
+	for _, r := range rules {
+		paths = append(paths, r.JSONPath)
+	}
+	assert.Contains(t, paths, "$.documentUrl")
+}
+
+func TestDocumentURL_RedactionRoundTrip(t *testing.T) {
+	// Verifies that RedactForLogging actually replaces the URL value with
+	// the redaction marker for a Reports document response.
+	reg := NewRegistry()
+	eng := NewEngine(reg)
+
+	body := []byte(`{"url":"https://tortuga-prod.s3.amazonaws.com/abc?X-Amz-Signature=secret","encryptionDetails":{"standard":"AES","initializationVector":"iv","key":"keymat"},"compressionAlgorithm":"GZIP"}`)
+	redacted, wasPII := eng.RedactForLogging("/reports/2021-06-30/documents/{documentId}", body)
+
+	assert.True(t, wasPII)
+	assert.NotContains(t, string(redacted), "tortuga-prod.s3.amazonaws.com")
+	assert.NotContains(t, string(redacted), "X-Amz-Signature=secret")
+	assert.NotContains(t, string(redacted), "keymat")
+	// Non-PII fields remain visible
+	assert.Contains(t, string(redacted), "GZIP")
+}
+

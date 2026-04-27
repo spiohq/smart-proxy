@@ -121,6 +121,17 @@ var DefaultPIIRules = map[string][]FieldRedaction{
 		{JSONPath: "$.payload.ShippingAddress.PostalCode", Mode: RedactModeRedact},
 		{JSONPath: "$.payload.ShippingAddress.Phone", Mode: RedactModeRedact},
 	},
+	"/reports/2021-06-30/documents/{documentId}": {
+		{JSONPath: "$.url", Mode: RedactModeRedact},
+		{JSONPath: "$.encryptionDetails.key", Mode: RedactModeRedact},
+	},
+	"/feeds/2021-06-30/documents/{feedDocumentId}": {
+		{JSONPath: "$.url", Mode: RedactModeRedact},
+		{JSONPath: "$.encryptionDetails.key", Mode: RedactModeRedact},
+	},
+	"/datakiosk/2023-11-15/documents/{documentId}": {
+		{JSONPath: "$.documentUrl", Mode: RedactModeRedact},
+	},
 }
 
 // ConditionalPIIRules maps endpoint patterns to PII field redaction rules
