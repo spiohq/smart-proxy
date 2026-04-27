@@ -45,10 +45,6 @@ func main() {
 		slog.Error("invalid configuration", "error", err)
 		os.Exit(1)
 	}
-	for _, w := range cfg.Warnings() {
-		slog.Warn("configuration warning", "message", w)
-	}
-
 	resolver := merchant.NewResolver(nil)
 
 	// Rate limiter
@@ -142,6 +138,14 @@ func main() {
 	_ = auditLogger.Log(ctx, "startup", "main", "proxy starting", map[string]any{
 		"version": "dev",
 	})
+
+	// Surface configuration warnings as logs AND audit events. The audit-event
+	// trail is the operator's evidence, in a DPP audit, that they were warned
+	// about non-conformant defaults at startup.
+	for _, w := range cfg.Warnings() {
+		slog.Warn("configuration warning", "message", w)
+		_ = auditLogger.Log(ctx, audit.EventDPPComplianceWarning, "config", w, nil)
+	}
 
 	// Parse purge retention durations
 	metadataRetention, _ := time.ParseDuration(cfg.Purge.MetadataRetention)
