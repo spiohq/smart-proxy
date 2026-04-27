@@ -369,3 +369,16 @@ func TestHasInsecureS3Endpoint(t *testing.T) {
 		assert.Equal(t, tt.want, hasInsecureS3Endpoint(tt.endpoint), "endpoint=%q", tt.endpoint)
 	}
 }
+
+func TestDefaults_FailClosedTrue(t *testing.T) {
+	t.Setenv("SP_PROXY_PII_FAIL_CLOSED", "")
+	cfg := Load()
+	assert.True(t, cfg.PII.FailClosed, "FAIL_CLOSED must default to true (DPP §2.6)")
+}
+
+func TestDefaults_FailClosedExplicitFalse(t *testing.T) {
+	// Operator can still opt out (warning fires; tested separately).
+	t.Setenv("SP_PROXY_PII_FAIL_CLOSED", "false")
+	cfg := Load()
+	assert.False(t, cfg.PII.FailClosed)
+}
