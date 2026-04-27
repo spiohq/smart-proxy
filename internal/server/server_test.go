@@ -129,3 +129,67 @@ func TestServer_DisabledRegionNotStarted(t *testing.T) {
 	assert.Empty(t, srv.RegionAddr(RegionNA))
 	assert.Empty(t, srv.RegionAddr(RegionFE))
 }
+
+func TestDashboardBindAddr_DefaultsToLoopback(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			PortEU:            0,
+			PortNA:            0,
+			PortFE:            0,
+			PortDashboard:     freePort(t),
+			DashboardBindAddr: "127.0.0.1",
+			ShutdownTimeout:   "5s",
+		},
+	}
+
+	srv, err := New(cfg, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	require.NoError(t, err)
+
+	go srv.Start()
+	defer srv.Shutdown()
+
+	require.Eventually(t, func() bool {
+		return srv.DashboardAddr() != ""
+	}, 2*time.Second, 20*time.Millisecond)
+
+	addr := srv.DashboardAddr()
+	host, _, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	assert.True(t, host == "127.0.0.1" || host == "::1",
+		"dashboard bound to non-loopback host %q", host)
+}
+
+func TestDashboardBindAddr_ExplicitWildcard(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			PortEU:            0,
+			PortNA:            0,
+			PortFE:            0,
+			PortDashboard:     freePort(t),
+			DashboardBindAddr: "0.0.0.0",
+			ShutdownTimeout:   "5s",
+		},
+	}
+
+	srv, err := New(cfg, nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	require.NoError(t, err)
+
+	go srv.Start()
+	defer srv.Shutdown()
+
+	require.Eventually(t, func() bool {
+		return srv.DashboardAddr() != ""
+	}, 2*time.Second, 20*time.Millisecond)
+
+	addr := srv.DashboardAddr()
+	host, _, err := net.SplitHostPort(addr)
+	require.NoError(t, err)
+	// On wildcard bind, the OS may report the address as "::" or "0.0.0.0"
+	// depending on dual-stack behaviour. Either is correct.
+	assert.True(t, host == "0.0.0.0" || host == "::",
+		"wildcard bind expected 0.0.0.0 or ::, got %q", host)
+}

@@ -389,3 +389,16 @@ func TestDefaults_AuditRetention13Months(t *testing.T) {
 	assert.Equal(t, "9504h", cfg.Purge.AuditRetention,
 		"audit retention must default to 9504h (~13 months) per DPP §2.6 (>=12 months) with a buffer")
 }
+
+func TestDefaults_DashboardBindAddrLoopback(t *testing.T) {
+	t.Setenv("SP_PROXY_DASHBOARD_BIND_ADDR", "")
+	cfg := Load()
+	assert.Equal(t, "127.0.0.1", cfg.Server.DashboardBindAddr,
+		"dashboard bind addr must default to loopback so accidental Docker port-forwards do not expose it")
+}
+
+func TestDashboardBindAddr_FromEnv(t *testing.T) {
+	t.Setenv("SP_PROXY_DASHBOARD_BIND_ADDR", "0.0.0.0")
+	cfg := Load()
+	assert.Equal(t, "0.0.0.0", cfg.Server.DashboardBindAddr)
+}

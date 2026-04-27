@@ -13,8 +13,8 @@ import (
 // RateLimitConfig holds rate limiting settings.
 type RateLimitConfig struct {
 	Enabled        bool
-	DefaultMode    string            // "queue", "reject", "queue-timeout"
-	QueueTimeout   string            // Duration string, e.g. "60s"
+	DefaultMode    string // "queue", "reject", "queue-timeout"
+	QueueTimeout   string // Duration string, e.g. "60s"
 	QueueMaxDepth  int
 	ThrottleFactor float64           // 0.0-1.0, default 0.8
 	BucketTTL      string            // Duration string for GC, e.g. "2h"
@@ -111,11 +111,12 @@ type RDTConfig struct {
 // In tests, use port 0 with net.Listen to let the OS assign a free port;
 // but for config semantics, 0 means "don't start this listener".
 type ServerConfig struct {
-	PortEU          int
-	PortNA          int
-	PortFE          int
-	PortDashboard   int
-	ShutdownTimeout string
+	PortEU            int
+	PortNA            int
+	PortFE            int
+	PortDashboard     int
+	DashboardBindAddr string // SP_PROXY_DASHBOARD_BIND_ADDR; "127.0.0.1" by default
+	ShutdownTimeout   string
 }
 
 // Load reads configuration from environment variables with defaults.
@@ -144,11 +145,12 @@ func loadConfig(logger *slog.Logger) *Config {
 	return &Config{
 		Env: envStr("SP_PROXY_ENV", "development"),
 		Server: ServerConfig{
-			PortEU:          iInt("SP_PROXY_PORT_EU", 8080),
-			PortNA:          iInt("SP_PROXY_PORT_NA", 8081),
-			PortFE:          iInt("SP_PROXY_PORT_FE", 8082),
-			PortDashboard:   iInt("SP_PROXY_PORT_DASHBOARD", 9090),
-			ShutdownTimeout: envStr("SP_PROXY_SHUTDOWN_TIMEOUT", "30s"),
+			PortEU:            iInt("SP_PROXY_PORT_EU", 8080),
+			PortNA:            iInt("SP_PROXY_PORT_NA", 8081),
+			PortFE:            iInt("SP_PROXY_PORT_FE", 8082),
+			PortDashboard:     iInt("SP_PROXY_PORT_DASHBOARD", 9090),
+			DashboardBindAddr: envStr("SP_PROXY_DASHBOARD_BIND_ADDR", "127.0.0.1"),
+			ShutdownTimeout:   envStr("SP_PROXY_SHUTDOWN_TIMEOUT", "30s"),
 		},
 		RateLimit: RateLimitConfig{
 			Enabled:        iBool("SP_PROXY_RATELIMIT_ENABLED", true),
