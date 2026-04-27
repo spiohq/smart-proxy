@@ -26,6 +26,8 @@ Tokens (LWA + RDT) live in **process memory only** and never hit disk. Restartin
 
 When `SP_PROXY_BODIES_BACKEND=s3`, set `SP_PROXY_S3_SSE` to enforce server-side encryption on every PutObject (see [docs/STORAGE.md](docs/STORAGE.md#server-side-encryption)). Pair with a bucket policy that denies unencrypted uploads.
 
+**Application-level encryption is intentionally not implemented.** Operators provide at-rest protection via volume encryption (EBS, LUKS, dm-crypt) and S3 server-side encryption (`SP_PROXY_S3_SSE`).
+
 ### Network exposure
 
 Smart Proxy is designed to run as a **sidecar or private-network component**. It MUST NOT be exposed directly to the public internet without an authenticating reverse proxy in front of it. The proxy honors `X-SP-Proxy-Merchant-Id` for tenant identification; an unauthenticated public endpoint would let any caller self-claim any merchant key.
@@ -37,6 +39,10 @@ Recommended deployment shapes:
 - Behind an authenticating reverse proxy (mTLS, OAuth, IP allowlist).
 
 The dashboard (`SP_PROXY_PORT_DASHBOARD`, default `9090`) ships **without authentication**. It MUST be bound to a private interface or sit behind an auth layer; never expose it to the internet.
+
+The dashboard now defaults to bind address `127.0.0.1` (`SP_PROXY_DASHBOARD_BIND_ADDR`). For container deployments, use a host-side `127.0.0.1:9090:9090` port mapping and set `SP_PROXY_DASHBOARD_BIND_ADDR=0.0.0.0` inside the container. The container will emit a `dpp_compliance_warning` audit event indicating that an authenticating reverse proxy must front the host port; this is the expected audit signal.
+
+For the full DPP/AUP compliance reference -- shared-responsibility matrix, audit-prep checklist, and operator-specific touch points -- see [docs/DPP_COMPLIANCE.md](docs/DPP_COMPLIANCE.md).
 
 ---
 

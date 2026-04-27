@@ -140,7 +140,8 @@ The following headers are always redacted in log output, regardless of endpoint:
 | Variable | Default | Description |
 |---|---|---|
 | `SP_PROXY_CACHE_EXCLUDE_PII` | `true` | Exclude PII-containing responses from cache |
-| `SP_PROXY_PII_FAIL_CLOSED` | `false` | Treat any path that does not match a registered SP-API endpoint as PII (full-body redact, exclude from cache). Recommended for production. |
+| `SP_PROXY_PII_FAIL_CLOSED` | `true` | Treat any path that does not match a registered SP-API endpoint as PII (full-body redact, exclude from cache). Recommended for production. |
+| `SP_PROXY_PII_QUERY_PARAMS` | | Comma-separated extra query-param names treated as PII (case-insensitive). buyerEmail and buyerName are always redacted. |
 | `SP_PROXY_PURGE_METADATA_RETENTION` | `720h` (30 days) | How long request logs are retained |
 | `SP_PROXY_PURGE_AUDIT_RETENTION` | `8760h` (365 days) | How long audit logs are retained |
 | `SP_PROXY_BODIES_RECENT_MAX_AGE` | `72h` (3 days) | Recent body file retention |

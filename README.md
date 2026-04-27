@@ -101,7 +101,7 @@ docker run -d \
   -p 8080:8080 \
   -p 8081:8081 \
   -p 8082:8082 \
-  -p 9090:9090 \
+  -p 127.0.0.1:9090:9090 \
   -v sp-proxy-data:/data \
   ghcr.io/spiohq/smart-proxy:latest
 ```
@@ -214,6 +214,7 @@ All configuration is via environment variables. See [`deploy/example.env`](deplo
 | `SP_PROXY_PORT_FE` | `8082` | FE region proxy port (`0` = disabled) |
 | `SP_PROXY_PORT_DASHBOARD` | `9090` | Dashboard web UI port |
 | `SP_PROXY_SHUTDOWN_TIMEOUT` | `30s` | Graceful shutdown timeout |
+| `SP_PROXY_DASHBOARD_BIND_ADDR` | `127.0.0.1` | Bind address for the dashboard listener. Use `0.0.0.0` only when running in a container with host-side `127.0.0.1` port mapping in front. |
 
 ### Rate Limiting
 
@@ -248,7 +249,7 @@ All configuration is via environment variables. See [`deploy/example.env`](deplo
 | `SP_PROXY_STORAGE_BACKEND` | `sqlite` | Metadata store backend |
 | `SP_PROXY_SQLITE_PATH` | `/data/sp-proxy.db` | SQLite database path |
 | `SP_PROXY_PURGE_METADATA_RETENTION` | `720h` | Request log retention (30 days) |
-| `SP_PROXY_PURGE_AUDIT_RETENTION` | `8760h` | Audit log retention (365 days) |
+| `SP_PROXY_PURGE_AUDIT_RETENTION` | `9504h` | Audit log retention (~13 months; DPP §2.6 requires >=12 months) |
 
 ### Body Storage
 
@@ -274,6 +275,7 @@ again (`archive/`). Headers live next to the payload in the same JSONL entry.
 > - **Production at ~100k+ req/h**: switch to `BODIES_BACKEND=s3`. The local disk only needs to hold the active hour plus staging (figure 2-4 GiB for typical SP-API traffic). Everything older lives on the object store.
 > - **Storage growth surprise**: the active hour is always local. If local disk fills up fast, it's not retention, it's `MAX_CAPTURE_SIZE` times your req/h. Drop the cap before raising the volume.
 > - **DB file not shrinking after purge**: SQLite maintenance runs hourly inside the metadata purge job. If the file still grows, check that the job is actually scheduled (look for `metadata purged` log lines).
+> - **PII retention is capped at 30d by default** (`BODIES_ARCHIVE_MAX_AGE=720h`) per DPP §2.1. Do not raise this above 30d for production traffic that includes PII.
 
 ### S3 Backend
 
