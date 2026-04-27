@@ -330,3 +330,57 @@ func TestLoggingMiddleware_MerchantFallbackToTokenHash(t *testing.T) {
 	assert.Contains(t, allMeta[0].MerchantKey, "tokenhash:",
 		"without explicit merchant header, should fallback to token hash")
 }
+
+func TestLoggingMiddleware_QueryParamsRedacted(t *testing.T) {
+	logger, ms, _ := setupTestLogger(t)
+	registry := pii.NewRegistry()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.Write([]byte(`{}`))
+	})
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
+
+	req := httptest.NewRequest("GET", "/orders/v0/orders?buyerEmail=foo%40bar.com&MarketplaceIds=A1", nil)
+	req = withMerchant(req, "merchant-a")
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	logger.Close()
+
+	allMeta := ms.allEntries()
+	require.Len(t, allMeta, 1)
+	got := allMeta[0].QueryParams
+	assert.NotContains(t, got, "foo%40bar.com", "buyerEmail value must be redacted in stored query params")
+	assert.NotContains(t, got, "foo@bar.com")
+	assert.Contains(t, got, "buyerEmail=%5BREDACTED%5D")
+	assert.Contains(t, got, "MarketplaceIds=A1", "non-PII params must remain visible")
+}
+
+func TestLoggingMiddleware_QueryParamsRedacted_CustomExtras(t *testing.T) {
+	t.Helper()
+	ms := &mockStore{}
+	bs := &mockBodyStore{}
+	registry := pii.NewRegistryWithExtras([]string{"customField"})
+	engine := pii.NewEngine(registry)
+	logger := NewAsyncLogger(ms, bs, engine, 100)
+	t.Cleanup(func() { logger.Close() })
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+	})
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
+
+	req := httptest.NewRequest("GET", "/catalog/2022-04-01/items?customField=secret&asin=B0", nil)
+	req = withMerchant(req, "merchant-b")
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	logger.Close()
+
+	allMeta := ms.allEntries()
+	require.Len(t, allMeta, 1)
+	got := allMeta[0].QueryParams
+	assert.Contains(t, got, "customField=%5BREDACTED%5D")
+	assert.Contains(t, got, "asin=B0")
+}

@@ -78,7 +78,7 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 				Region:                region,
 				Method:                r.Method,
 				Path:                  r.URL.Path,
-				QueryParams:           r.URL.RawQuery,
+				QueryParams:           pii.RedactQueryString(r.URL.RawQuery, piiRegistry.QueryParamsExtra()),
 				StatusCode:            capture.StatusCode(),
 				CacheStatus:           cacheStatus,
 				TotalLatencyMs:        totalLatency,
