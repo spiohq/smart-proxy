@@ -64,12 +64,10 @@ func main() {
 	rlMiddleware := ratelimit.RateLimitMiddleware(limiter, &cfg.RateLimit)
 
 	// Cache + PII
-	var registry *pii.Registry
+	registry := pii.NewRegistryWithExtras(cfg.PII.QueryParamsExtra)
+	registry.SetFailClosed(cfg.PII.FailClosed)
 	if cfg.PII.FailClosed {
-		registry = pii.NewRegistryFailClosed()
 		slog.Info("PII fail-closed mode enabled: unknown endpoints treated as PII")
-	} else {
-		registry = pii.NewRegistry()
 	}
 	var cacheMiddleware proxy.Middleware
 	var memCache *cache.MemoryCache

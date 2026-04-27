@@ -519,3 +519,10 @@ func TestRegistry_QueryParamsExtra_Custom(t *testing.T) {
 	assert.True(t, got["barparam"])
 	assert.False(t, got["FooParam"])
 }
+
+func TestRegistry_SetFailClosed(t *testing.T) {
+	reg := NewRegistryWithExtras([]string{"foo"})
+	assert.False(t, reg.FailClosed())
+	reg.SetFailClosed(true)
+	assert.True(t, reg.FailClosed())
+}

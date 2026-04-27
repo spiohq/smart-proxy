@@ -244,6 +244,13 @@ func NewRegistryWithExtras(extras []string) *Registry {
 	return r
 }
 
+// SetFailClosed enables fail-closed mode on an existing registry. Used by
+// callers that build the registry via NewRegistryWithExtras and then want
+// to apply config-driven flags.
+func (reg *Registry) SetFailClosed(v bool) {
+	reg.failClosed = v
+}
+
 // FailClosed reports whether the registry treats unknown endpoints as PII.
 func (reg *Registry) FailClosed() bool { return reg.failClosed }
 
