@@ -445,6 +445,31 @@ func (c *Config) Warnings() []string {
 			w = append(w, "SP_PROXY_S3_SSE is empty; relying on bucket-default encryption. Set SP_PROXY_S3_SSE=AES256 (or aws:kms) to enforce server-side encryption explicitly.")
 		}
 	}
+
+	if !c.IsProduction() {
+		return w
+	}
+
+	// DPP/AUP warnings (production-only).
+	if !c.PII.FailClosed {
+		w = append(w, "SP_PROXY_PII_FAIL_CLOSED=false in production: unknown SP-API endpoints will be logged unredacted, violating DPP §2.6.")
+	}
+	if !c.Cache.ExcludePII {
+		w = append(w, "SP_PROXY_CACHE_EXCLUDE_PII=false in production: PII responses will be cached, violating DPP §2.1 retention.")
+	}
+	if d, err := time.ParseDuration(c.Bodies.ArchiveMaxAge); err == nil && d > 30*24*time.Hour {
+		w = append(w, fmt.Sprintf("SP_PROXY_BODIES_ARCHIVE_MAX_AGE=%s exceeds 30d in production: PII bodies retained beyond DPP §2.1 limit.", c.Bodies.ArchiveMaxAge))
+	}
+	if d, err := time.ParseDuration(c.Purge.MetadataRetention); err == nil && d > 18*30*24*time.Hour {
+		w = append(w, fmt.Sprintf("SP_PROXY_PURGE_METADATA_RETENTION=%s exceeds 18 months in production: violates DPP §1.7 non-PII retention limit.", c.Purge.MetadataRetention))
+	}
+	if d, err := time.ParseDuration(c.Purge.AuditRetention); err == nil && d < 12*30*24*time.Hour {
+		w = append(w, fmt.Sprintf("SP_PROXY_PURGE_AUDIT_RETENTION=%s is below 12 months in production: violates DPP §2.6 audit log retention.", c.Purge.AuditRetention))
+	}
+	if c.Server.DashboardBindAddr != "127.0.0.1" && c.Server.DashboardBindAddr != "::1" && c.Server.DashboardBindAddr != "localhost" {
+		w = append(w, fmt.Sprintf("SP_PROXY_DASHBOARD_BIND_ADDR=%q is non-loopback in production: ensure an authenticating reverse proxy is in front of the dashboard.", c.Server.DashboardBindAddr))
+	}
+
 	return w
 }
 

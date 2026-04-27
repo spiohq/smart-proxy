@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -401,4 +402,87 @@ func TestDashboardBindAddr_FromEnv(t *testing.T) {
 	t.Setenv("SP_PROXY_DASHBOARD_BIND_ADDR", "0.0.0.0")
 	cfg := Load()
 	assert.Equal(t, "0.0.0.0", cfg.Server.DashboardBindAddr)
+}
+
+// productionConfigBase returns a Config that is production-mode and DPP-conformant.
+// Each warnings test starts from this and breaks one knob.
+func productionConfigBase(t *testing.T) *Config {
+	t.Helper()
+	t.Setenv("SP_PROXY_ENV", "production")
+	t.Setenv("SP_PROXY_PII_FAIL_CLOSED", "true")
+	t.Setenv("SP_PROXY_CACHE_EXCLUDE_PII", "true")
+	t.Setenv("SP_PROXY_BODIES_ARCHIVE_MAX_AGE", "720h")
+	t.Setenv("SP_PROXY_PURGE_METADATA_RETENTION", "720h")
+	t.Setenv("SP_PROXY_PURGE_AUDIT_RETENTION", "9504h")
+	t.Setenv("SP_PROXY_DASHBOARD_BIND_ADDR", "127.0.0.1")
+	t.Setenv("SP_PROXY_BODIES_BACKEND", "local")
+	return Load()
+}
+
+func TestProductionWarnings_BaseIsClean(t *testing.T) {
+	cfg := productionConfigBase(t)
+	assert.Empty(t, cfg.Warnings(),
+		"a DPP-conformant production config must produce no warnings")
+}
+
+func TestProductionWarnings_FailClosedFalse(t *testing.T) {
+	productionConfigBase(t)
+	t.Setenv("SP_PROXY_PII_FAIL_CLOSED", "false")
+	cfg := Load()
+	w := strings.Join(cfg.Warnings(), "\n")
+	assert.Contains(t, w, "SP_PROXY_PII_FAIL_CLOSED")
+	assert.Contains(t, w, "DPP")
+}
+
+func TestProductionWarnings_CacheExcludePIIFalse(t *testing.T) {
+	productionConfigBase(t)
+	t.Setenv("SP_PROXY_CACHE_EXCLUDE_PII", "false")
+	cfg := Load()
+	w := strings.Join(cfg.Warnings(), "\n")
+	assert.Contains(t, w, "SP_PROXY_CACHE_EXCLUDE_PII")
+}
+
+func TestProductionWarnings_LongArchiveRetention(t *testing.T) {
+	productionConfigBase(t)
+	t.Setenv("SP_PROXY_BODIES_ARCHIVE_MAX_AGE", "1440h") // 60d
+	cfg := Load()
+	w := strings.Join(cfg.Warnings(), "\n")
+	assert.Contains(t, w, "SP_PROXY_BODIES_ARCHIVE_MAX_AGE")
+	assert.Contains(t, w, "30d")
+}
+
+func TestProductionWarnings_LongMetadataRetention(t *testing.T) {
+	productionConfigBase(t)
+	t.Setenv("SP_PROXY_PURGE_METADATA_RETENTION", "14400h") // ~20 months
+	cfg := Load()
+	w := strings.Join(cfg.Warnings(), "\n")
+	assert.Contains(t, w, "SP_PROXY_PURGE_METADATA_RETENTION")
+	assert.Contains(t, w, "18 months")
+}
+
+func TestProductionWarnings_ShortAuditRetention(t *testing.T) {
+	productionConfigBase(t)
+	t.Setenv("SP_PROXY_PURGE_AUDIT_RETENTION", "720h") // 30d
+	cfg := Load()
+	w := strings.Join(cfg.Warnings(), "\n")
+	assert.Contains(t, w, "SP_PROXY_PURGE_AUDIT_RETENTION")
+	assert.Contains(t, w, "12 months")
+}
+
+func TestProductionWarnings_NonLoopbackDashboard(t *testing.T) {
+	productionConfigBase(t)
+	t.Setenv("SP_PROXY_DASHBOARD_BIND_ADDR", "0.0.0.0")
+	cfg := Load()
+	w := strings.Join(cfg.Warnings(), "\n")
+	assert.Contains(t, w, "SP_PROXY_DASHBOARD_BIND_ADDR")
+}
+
+func TestProductionWarnings_DevelopmentSilent(t *testing.T) {
+	t.Setenv("SP_PROXY_ENV", "development")
+	t.Setenv("SP_PROXY_PII_FAIL_CLOSED", "false") // would warn in prod
+	cfg := Load()
+	for _, w := range cfg.Warnings() {
+		assert.NotContains(t, w, "SP_PROXY_PII_FAIL_CLOSED",
+			"DPP warnings must be production-only")
+	}
 }
