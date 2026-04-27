@@ -420,3 +420,34 @@ func TestRegulatedInfo_NotFullBody(t *testing.T) {
 	assert.False(t, reg.IsFullBodyPII("/orders/v0/orders/{orderId}/regulatedInfo"))
 }
 
+func TestSingleOrderV0_HasFieldRules(t *testing.T) {
+	reg := NewRegistry()
+	rules := reg.RulesFor("/orders/v0/orders/{orderId}")
+	assert.NotEmpty(t, rules, "expected rules for /orders/v0/orders/{orderId}")
+
+	var paths []string
+	for _, r := range rules {
+		paths = append(paths, r.JSONPath)
+	}
+	// Single-order endpoint has the order directly under $.payload (no Orders[*] array).
+	assert.Contains(t, paths, "$.payload.BuyerInfo.BuyerEmail")
+	assert.Contains(t, paths, "$.payload.BuyerInfo.BuyerName")
+	assert.Contains(t, paths, "$.payload.BuyerInfo.BuyerTaxInfo")
+	assert.Contains(t, paths, "$.payload.ShippingAddress.AddressLine1")
+	assert.Contains(t, paths, "$.payload.ShippingAddress.PostalCode")
+	assert.Contains(t, paths, "$.payload.ShippingAddress.Phone")
+}
+
+func TestSingleOrderItemsV0_HasFieldRules(t *testing.T) {
+	reg := NewRegistry()
+	rules := reg.RulesFor("/orders/v0/orders/{orderId}/orderItems")
+	assert.NotEmpty(t, rules, "expected rules for /orders/v0/orders/{orderId}/orderItems")
+
+	var paths []string
+	for _, r := range rules {
+		paths = append(paths, r.JSONPath)
+	}
+	assert.Contains(t, paths, "$.payload.OrderItems[*].BuyerInfo.BuyerCustomizedInfo")
+	assert.Contains(t, paths, "$.payload.OrderItems[*].BuyerInfo.GiftMessageText")
+}
+
