@@ -382,3 +382,10 @@ func TestDefaults_FailClosedExplicitFalse(t *testing.T) {
 	cfg := Load()
 	assert.False(t, cfg.PII.FailClosed)
 }
+
+func TestDefaults_AuditRetention13Months(t *testing.T) {
+	t.Setenv("SP_PROXY_PURGE_AUDIT_RETENTION", "")
+	cfg := Load()
+	assert.Equal(t, "9504h", cfg.Purge.AuditRetention,
+		"audit retention must default to 9504h (~13 months) per DPP §2.6 (>=12 months) with a buffer")
+}

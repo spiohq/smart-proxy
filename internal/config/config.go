@@ -194,7 +194,7 @@ func loadConfig(logger *slog.Logger) *Config {
 		},
 		Purge: PurgeConfig{
 			MetadataRetention: envStr("SP_PROXY_PURGE_METADATA_RETENTION", "720h"),
-			AuditRetention:    envStr("SP_PROXY_PURGE_AUDIT_RETENTION", "8760h"),
+			AuditRetention:    envStr("SP_PROXY_PURGE_AUDIT_RETENTION", "9504h"),
 		},
 		Prometheus: PrometheusConfig{
 			Enabled: iBool("SP_PROXY_PROMETHEUS_ENABLED", true),
