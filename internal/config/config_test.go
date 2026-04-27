@@ -188,3 +188,172 @@ func TestValidate_BodiesCompressionUnknown(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "COMPRESSION")
 }
+
+func TestLoad_EnvDefaultsToDevelopment(t *testing.T) {
+	os.Unsetenv("SP_PROXY_ENV")
+	cfg := Load()
+	assert.Equal(t, "development", cfg.Env)
+	assert.False(t, cfg.IsProduction())
+}
+
+func TestLoad_EnvProduction(t *testing.T) {
+	t.Setenv("SP_PROXY_ENV", "production")
+	cfg := Load()
+	assert.Equal(t, "production", cfg.Env)
+	assert.True(t, cfg.IsProduction())
+}
+
+func TestIsProduction_CaseInsensitive(t *testing.T) {
+	assert.True(t, (&Config{Env: "Production"}).IsProduction())
+	assert.True(t, (&Config{Env: "PRODUCTION"}).IsProduction())
+	assert.False(t, (&Config{Env: "prod"}).IsProduction())
+	assert.False(t, (&Config{Env: ""}).IsProduction())
+}
+
+func TestLoad_PIIFailClosedDefault(t *testing.T) {
+	os.Unsetenv("SP_PROXY_PII_FAIL_CLOSED")
+	cfg := Load()
+	assert.False(t, cfg.PII.FailClosed, "fail-closed must default to false to avoid breaking existing deployments")
+}
+
+func TestLoad_PIIFailClosedEnv(t *testing.T) {
+	t.Setenv("SP_PROXY_PII_FAIL_CLOSED", "true")
+	cfg := Load()
+	assert.True(t, cfg.PII.FailClosed)
+}
+
+func TestLoad_S3SSEDefaults(t *testing.T) {
+	os.Unsetenv("SP_PROXY_S3_SSE")
+	os.Unsetenv("SP_PROXY_S3_SSE_KMS_KEY")
+	cfg := Load()
+	assert.Equal(t, "", cfg.Bodies.S3.SSE)
+	assert.Equal(t, "", cfg.Bodies.S3.SSEKMSKey)
+}
+
+func TestLoad_S3SSEEnvOverrides(t *testing.T) {
+	t.Setenv("SP_PROXY_S3_SSE", "aws:kms")
+	t.Setenv("SP_PROXY_S3_SSE_KMS_KEY", "alias/proxy-bodies")
+	cfg := Load()
+	assert.Equal(t, "aws:kms", cfg.Bodies.S3.SSE)
+	assert.Equal(t, "alias/proxy-bodies", cfg.Bodies.S3.SSEKMSKey)
+}
+
+func TestValidate_S3SSEInvalid(t *testing.T) {
+	cfg := validatableS3Cfg()
+	cfg.Bodies.S3.SSE = "rot13"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "SP_PROXY_S3_SSE")
+}
+
+func TestValidate_S3SSEAcceptsKnownValues(t *testing.T) {
+	for _, sse := range []string{"", "AES256", "aws:kms", "aws:kms:dsse"} {
+		cfg := validatableS3Cfg()
+		cfg.Bodies.S3.SSE = sse
+		assert.NoError(t, cfg.Validate(), "SSE=%q should validate", sse)
+	}
+}
+
+// validatableS3Cfg returns a baseline config that is valid for S3 backend
+// tests: in-memory SQLite, current-dir bodies path, EU port set so Validate
+// does not trip over unrelated requirements.
+func validatableS3Cfg() *Config {
+	cfg := Load()
+	cfg.Storage.SQLitePath = ":memory:"
+	cfg.Bodies.BasePath = "."
+	cfg.Bodies.Enabled = true
+	cfg.Bodies.Backend = "s3"
+	cfg.Bodies.S3.Bucket = "b"
+	return cfg
+}
+
+func TestValidate_S3InsecureEndpointBlockedInProd(t *testing.T) {
+	cfg := validatableS3Cfg()
+	cfg.Env = "production"
+	cfg.Bodies.S3.Endpoint = "http://minio.internal:9000"
+	err := cfg.Validate()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "plain http")
+}
+
+func TestValidate_S3InsecureEndpointAllowedInDev(t *testing.T) {
+	cfg := validatableS3Cfg()
+	cfg.Env = "development"
+	cfg.Bodies.S3.Endpoint = "http://minio.internal:9000"
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestValidate_S3HTTPSEndpointAllowedInProd(t *testing.T) {
+	cfg := validatableS3Cfg()
+	cfg.Env = "production"
+	cfg.Bodies.S3.Endpoint = "https://minio.internal:9000"
+	cfg.Bodies.S3.SSE = "AES256"
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestValidate_S3EmptyEndpointAllowedInProd(t *testing.T) {
+	// Empty endpoint = real AWS = SDK uses https.
+	cfg := validatableS3Cfg()
+	cfg.Env = "production"
+	cfg.Bodies.S3.Endpoint = ""
+	cfg.Bodies.S3.SSE = "AES256"
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestWarnings_HTTPSEndpointAndExplicitSSE_NoWarnings(t *testing.T) {
+	cfg := Load()
+	cfg.Bodies.Enabled = true
+	cfg.Bodies.Backend = "s3"
+	cfg.Bodies.S3.Bucket = "b"
+	cfg.Bodies.S3.Endpoint = "https://s3.eu-central-1.amazonaws.com"
+	cfg.Bodies.S3.SSE = "AES256"
+	assert.Empty(t, cfg.Warnings())
+}
+
+func TestWarnings_PlainHTTPEndpointFlagged(t *testing.T) {
+	cfg := Load()
+	cfg.Bodies.Enabled = true
+	cfg.Bodies.Backend = "s3"
+	cfg.Bodies.S3.Bucket = "b"
+	cfg.Bodies.S3.Endpoint = "http://minio.internal:9000"
+	cfg.Bodies.S3.SSE = "AES256"
+	w := cfg.Warnings()
+	require.Len(t, w, 1)
+	assert.Contains(t, w[0], "plain http")
+}
+
+func TestWarnings_EmptySSEFlagged(t *testing.T) {
+	cfg := Load()
+	cfg.Bodies.Enabled = true
+	cfg.Bodies.Backend = "s3"
+	cfg.Bodies.S3.Bucket = "b"
+	cfg.Bodies.S3.Endpoint = "https://s3.amazonaws.com"
+	cfg.Bodies.S3.SSE = ""
+	w := cfg.Warnings()
+	require.Len(t, w, 1)
+	assert.Contains(t, w[0], "SP_PROXY_S3_SSE")
+}
+
+func TestWarnings_LocalBackendNoWarnings(t *testing.T) {
+	cfg := Load()
+	cfg.Bodies.Enabled = true
+	cfg.Bodies.Backend = "local"
+	assert.Empty(t, cfg.Warnings())
+}
+
+func TestHasInsecureS3Endpoint(t *testing.T) {
+	tests := []struct {
+		endpoint string
+		want     bool
+	}{
+		{"", false},
+		{"https://s3.amazonaws.com", false},
+		{"HTTPS://s3.amazonaws.com", false},
+		{"http://minio.local:9000", true},
+		{"HTTP://minio.local:9000", true},
+		{"Http://Minio.local", true},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, hasInsecureS3Endpoint(tt.endpoint), "endpoint=%q", tt.endpoint)
+	}
+}

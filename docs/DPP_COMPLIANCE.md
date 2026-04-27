@@ -140,10 +140,24 @@ The following headers are always redacted in log output, regardless of endpoint:
 | Variable | Default | Description |
 |---|---|---|
 | `SP_PROXY_CACHE_EXCLUDE_PII` | `true` | Exclude PII-containing responses from cache |
+| `SP_PROXY_PII_FAIL_CLOSED` | `false` | Treat any path that does not match a registered SP-API endpoint as PII (full-body redact, exclude from cache). Recommended for production. |
 | `SP_PROXY_PURGE_METADATA_RETENTION` | `720h` (30 days) | How long request logs are retained |
 | `SP_PROXY_PURGE_AUDIT_RETENTION` | `8760h` (365 days) | How long audit logs are retained |
 | `SP_PROXY_BODIES_RECENT_MAX_AGE` | `72h` (3 days) | Recent body file retention |
 | `SP_PROXY_BODIES_ARCHIVE_MAX_AGE` | `8760h` (365 days) | Archived body file retention |
+
+### Fail-closed mode
+
+The PII registry maps known SP-API endpoints to their PII fields. If Amazon ships a new endpoint and it is not yet in the registry, the default behavior is "no rules apply" and the response body is logged and cached as-is. This is the **fail-open** posture: it preserves observability for unknown endpoints at the cost of leaking PII if the new endpoint happens to return any.
+
+Setting `SP_PROXY_PII_FAIL_CLOSED=true` flips this default. Any path that does not match a registered endpoint pattern (see [internal/endpoint/classify.go](../internal/endpoint/classify.go)) is treated as full-body PII: the response body is replaced with a placeholder in logs, and the response is excluded from the cache when `SP_PROXY_CACHE_EXCLUDE_PII=true`. The original response is still forwarded to your application unchanged.
+
+Trade-offs:
+
+- **Pro:** new SP-API endpoints cannot silently bypass redaction until you upgrade.
+- **Con:** dashboard log detail views show `{"redacted": true, ...}` for any endpoint not yet in the registry. You will need to update [internal/pii/registry.go](../internal/pii/registry.go) when Amazon adds endpoints you actually use.
+
+Enable this in production once you have visibility into your traffic shape and have confirmed all in-use endpoints are mapped.
 
 ## Best Practices
 

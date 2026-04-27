@@ -21,6 +21,8 @@ type fakeS3 struct {
 	objects map[string]fakeObject
 	// hook lets individual tests assert input shape.
 	lastPutRange string
+	lastPutSSE   types.ServerSideEncryption
+	lastPutKMS   string
 }
 
 type fakeObject struct {
@@ -36,6 +38,8 @@ func (f *fakeS3) PutObject(_ context.Context, in *s3.PutObjectInput, _ ...func(*
 		return nil, err
 	}
 	f.objects[aws.ToString(in.Key)] = fakeObject{body: b, modified: time.Now().UTC()}
+	f.lastPutSSE = in.ServerSideEncryption
+	f.lastPutKMS = aws.ToString(in.SSEKMSKeyId)
 	return &s3.PutObjectOutput{}, nil
 }
 
@@ -201,4 +205,60 @@ func TestS3RangeHeader(t *testing.T) {
 	assert.Equal(t, "bytes=0-9", s3RangeHeader(0, 10))
 	assert.Equal(t, "bytes=100-", s3RangeHeader(100, 0))
 	assert.Equal(t, "bytes=5-5", s3RangeHeader(5, 1))
+}
+
+func TestS3Backend_PutWithoutSSE(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeS3()
+	b := NewS3WithClient(fake, "bucket")
+	require.NoError(t, b.Put(ctx, "k", bytes.NewReader([]byte("x")), 1))
+	assert.Equal(t, types.ServerSideEncryption(""), fake.lastPutSSE)
+	assert.Equal(t, "", fake.lastPutKMS)
+}
+
+func TestS3Backend_PutWithAES256(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeS3()
+	b, err := NewS3WithClientSSE(fake, "bucket", "AES256", "")
+	require.NoError(t, err)
+	require.NoError(t, b.Put(ctx, "k", bytes.NewReader([]byte("x")), 1))
+	assert.Equal(t, types.ServerSideEncryptionAes256, fake.lastPutSSE)
+	assert.Equal(t, "", fake.lastPutKMS)
+}
+
+func TestS3Backend_PutWithKMS(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeS3()
+	b, err := NewS3WithClientSSE(fake, "bucket", "aws:kms", "alias/proxy-bodies")
+	require.NoError(t, err)
+	require.NoError(t, b.Put(ctx, "k", bytes.NewReader([]byte("x")), 1))
+	assert.Equal(t, types.ServerSideEncryptionAwsKms, fake.lastPutSSE)
+	assert.Equal(t, "alias/proxy-bodies", fake.lastPutKMS)
+}
+
+func TestS3Backend_PutWithKMSDsse(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeS3()
+	b, err := NewS3WithClientSSE(fake, "bucket", "aws:kms:dsse", "")
+	require.NoError(t, err)
+	require.NoError(t, b.Put(ctx, "k", bytes.NewReader([]byte("x")), 1))
+	assert.Equal(t, types.ServerSideEncryptionAwsKmsDsse, fake.lastPutSSE)
+	// KMS key omitted when caller didn't supply one.
+	assert.Equal(t, "", fake.lastPutKMS)
+}
+
+func TestS3Backend_KMSKeyIgnoredForAES256(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeS3()
+	b, err := NewS3WithClientSSE(fake, "bucket", "AES256", "alias/ignored")
+	require.NoError(t, err)
+	require.NoError(t, b.Put(ctx, "k", bytes.NewReader([]byte("x")), 1))
+	assert.Equal(t, types.ServerSideEncryptionAes256, fake.lastPutSSE)
+	assert.Equal(t, "", fake.lastPutKMS, "KMS key must not leak into AES256 puts")
+}
+
+func TestS3Backend_InvalidSSE(t *testing.T) {
+	_, err := NewS3WithClientSSE(newFakeS3(), "bucket", "rot13", "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported SSE")
 }

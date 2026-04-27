@@ -18,6 +18,7 @@ This document explains how both halves work, how to size retention so the disk d
 - [Backend: MinIO](#backend-minio)
 - [Backend: Cloudflare R2](#backend-cloudflare-r2)
 - [IAM and bucket policy](#iam-and-bucket-policy)
+- [Server-side encryption](#server-side-encryption)
 - [Operations](#operations)
 - [Troubleshooting](#troubleshooting)
 
@@ -226,6 +227,9 @@ SP_PROXY_S3_PATH_STYLE=true              # REQUIRED
 
 Create the bucket before starting the proxy, e.g. `mc mb local/my-proxy-bodies`.
 
+> **Use `https://`, not `http://`.**
+> The proxy does not enforce the scheme on the configured endpoint, but a plain-`http` endpoint sends body uploads (PII-redacted but otherwise plaintext) and access keys (signed with SigV4 over the wire) without TLS. Run MinIO behind TLS, either with [MinIO's built-in TLS support](https://min.io/docs/minio/linux/operations/network-encryption.html) or behind a TLS-terminating reverse proxy. Smart Proxy logs a runtime warning at startup when a non-`https` S3 endpoint is configured and refuses to start in production mode (`SP_PROXY_ENV=production`).
+
 ## Backend: Cloudflare R2
 
 R2 uses an account-scoped endpoint and supports virtual-hosted-style addressing:
@@ -285,6 +289,77 @@ For Hetzner / MinIO / R2, translate to the provider's own policy format; the act
 ### Lifecycle rules (optional)
 
 Smart Proxy already manages retention via its own rotator. If you also set a bucket-level lifecycle rule (e.g. "delete everything under `archive/` after 45 days"), make sure it is **looser** than `SP_PROXY_BODIES_ARCHIVE_MAX_AGE`, otherwise the provider will delete files the dashboard still thinks are available and the orphan cleanup won't run. Preferred: let the rotator own the deletion timeline.
+
+## Server-side encryption
+
+Bodies stored on S3 contain PII-redacted (but otherwise plaintext) request/response payloads. Protect them at rest by enforcing server-side encryption on every PutObject. Smart Proxy can set the SSE header itself, and the bucket policy can reject any unencrypted upload as a defense-in-depth check.
+
+### Enabling SSE in the proxy
+
+| Variable | Default | Description |
+|---|---|---|
+| `SP_PROXY_S3_SSE` | _empty_ | One of `AES256`, `aws:kms`, `aws:kms:dsse`. Empty = rely on bucket-default encryption. |
+| `SP_PROXY_S3_SSE_KMS_KEY` | _empty_ | KMS key ARN or alias. Only honored for `aws:kms` and `aws:kms:dsse`. |
+
+Examples:
+
+```bash
+# AES256 (SSE-S3): cheapest, no KMS dependency, AWS-managed keys.
+SP_PROXY_S3_SSE=AES256
+
+# SSE-KMS with a customer-managed key. Logs every encrypt/decrypt to CloudTrail
+# and lets you revoke decryption by disabling the key.
+SP_PROXY_S3_SSE=aws:kms
+SP_PROXY_S3_SSE_KMS_KEY=arn:aws:kms:eu-central-1:123456789012:key/abcd-...
+
+# Dual-layer SSE-KMS for regulated workloads.
+SP_PROXY_S3_SSE=aws:kms:dsse
+SP_PROXY_S3_SSE_KMS_KEY=alias/proxy-bodies
+```
+
+`AES256` works on any S3-compatible store (AWS, MinIO, R2, Hetzner). The `aws:kms*` variants are AWS-only.
+
+When `SP_PROXY_S3_SSE` is empty the proxy does not set the header; the object inherits the bucket's default encryption setting. New AWS S3 buckets enable SSE-S3 (`AES256`) by default since 2023. Hetzner, R2, and MinIO encrypt at rest with provider-managed keys. Setting `SP_PROXY_S3_SSE` explicitly is still recommended so the encryption mode does not change silently if a default later moves.
+
+### Bucket policy: deny unencrypted uploads
+
+Use this AWS bucket policy to reject any PutObject that does not declare encryption. The two `Deny` statements mirror each other: the first blocks puts with no encryption header at all, the second blocks puts with the wrong encryption mode. Pick one or both depending on whether you allow `AES256` only or require KMS.
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyUnencryptedPut",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::my-proxy-bodies/*",
+      "Condition": {
+        "Null": {
+          "s3:x-amz-server-side-encryption": "true"
+        }
+      }
+    },
+    {
+      "Sid": "DenyWrongEncryption",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::my-proxy-bodies/*",
+      "Condition": {
+        "StringNotEquals": {
+          "s3:x-amz-server-side-encryption": "AES256"
+        }
+      }
+    }
+  ]
+}
+```
+
+Replace `AES256` with `aws:kms` if you require KMS. Test the policy with the proxy running before flipping production: a denied PutObject manifests as `AccessDenied` in the rotator logs, and `recent/` upload will fail.
+
+For Hetzner / MinIO / R2 the bucket policy syntax differs but the concept is the same: gate PutObject on the presence of the SSE header. R2 and Hetzner currently encrypt-at-rest with provider-managed keys regardless; the SSE header is mostly a forward-compatibility hedge.
 
 ## Operations
 

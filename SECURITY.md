@@ -4,6 +4,42 @@ The Smart Proxy team takes security seriously. We appreciate responsible disclos
 
 ---
 
+## Deployment Requirements
+
+Smart Proxy does **not** perform application-level encryption at rest. Operators MUST satisfy these requirements when handling production SP-API traffic:
+
+### Encrypted storage volumes
+
+The proxy persists two things to disk: a SQLite metadata DB (`SP_PROXY_SQLITE_PATH`, default `/data/sp-proxy.db`) and the active hour of body JSONL files (`SP_PROXY_BODIES_PATH/current/`, default `/data/bodies`). Bodies are PII-redacted before write (see [docs/DPP_COMPLIANCE.md](docs/DPP_COMPLIANCE.md)), but request metadata (paths, query strings, status codes, latencies) is stored in the clear.
+
+Mount the proxy's data volume on encrypted block storage:
+
+- **AWS:** EBS encryption (default for new volumes since 2023) or encrypted EFS.
+- **GCP:** Persistent Disks are encrypted by default.
+- **Azure:** Managed Disks with SSE.
+- **Self-hosted / bare metal:** LUKS, dm-crypt, or ZFS native encryption.
+- **Kubernetes:** Use a StorageClass backed by an encrypted CSI driver.
+
+Tokens (LWA + RDT) live in **process memory only** and never hit disk. Restarting the proxy drops the cache cold.
+
+### Object storage encryption
+
+When `SP_PROXY_BODIES_BACKEND=s3`, set `SP_PROXY_S3_SSE` to enforce server-side encryption on every PutObject (see [docs/STORAGE.md](docs/STORAGE.md#server-side-encryption)). Pair with a bucket policy that denies unencrypted uploads.
+
+### Network exposure
+
+Smart Proxy is designed to run as a **sidecar or private-network component**. It MUST NOT be exposed directly to the public internet without an authenticating reverse proxy in front of it. The proxy honors `X-SP-Proxy-Merchant-Id` for tenant identification; an unauthenticated public endpoint would let any caller self-claim any merchant key.
+
+Recommended deployment shapes:
+
+- Same-host sidecar (loopback only).
+- Private VPC subnet, accessed by your application via an internal load balancer.
+- Behind an authenticating reverse proxy (mTLS, OAuth, IP allowlist).
+
+The dashboard (`SP_PROXY_PORT_DASHBOARD`, default `9090`) ships **without authentication**. It MUST be bound to a private interface or sit behind an auth layer; never expose it to the internet.
+
+---
+
 ## Reporting a Vulnerability
 
 **Do not open public GitHub issues for security vulnerabilities.**

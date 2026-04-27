@@ -166,6 +166,15 @@ var endpointPatterns = []struct {
 // Query strings are stripped and trailing slashes are removed before matching.
 // If no pattern matches, the cleaned path is returned as-is.
 func Classify(path string) string {
+	pattern, _ := ClassifyKnown(path)
+	return pattern
+}
+
+// ClassifyKnown is like Classify but also reports whether the path matched a
+// registered SP-API endpoint pattern. Callers that need fail-closed behavior
+// (e.g. PII redaction) use ok=false to treat the path as unknown and apply
+// strict defaults rather than falling back to "no rules apply".
+func ClassifyKnown(path string) (pattern string, ok bool) {
 	if idx := strings.IndexByte(path, '?'); idx != -1 {
 		path = path[:idx]
 	}
@@ -175,10 +184,10 @@ func Classify(path string) string {
 	for _, ep := range endpointPatterns {
 		if strings.HasPrefix(path, ep.prefix) && segmentCount == ep.segments {
 			if ep.suffix == "" || strings.HasSuffix(path, "/"+ep.suffix) {
-				return ep.pattern
+				return ep.pattern, true
 			}
 		}
 	}
 
-	return path
+	return path, false
 }

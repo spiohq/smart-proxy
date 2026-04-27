@@ -163,6 +163,7 @@ type Registry struct {
 	rules             map[string][]FieldRedaction
 	conditionalRules  map[string][]FieldRedaction
 	fullBodyEndpoints map[string]bool
+	failClosed        bool
 }
 
 // NewRegistry returns a Registry pre-loaded with the default SP-API PII rules.
@@ -173,6 +174,19 @@ func NewRegistry() *Registry {
 		fullBodyEndpoints: DefaultFullBodyPIIEndpoints,
 	}
 }
+
+// NewRegistryFailClosed returns a Registry that treats any path not matching
+// a registered SP-API endpoint pattern as PII-bearing. Use this in
+// production-style deployments where adding a new SP-API endpoint upstream
+// must not silently bypass redaction until the registry is updated.
+func NewRegistryFailClosed() *Registry {
+	r := NewRegistry()
+	r.failClosed = true
+	return r
+}
+
+// FailClosed reports whether the registry treats unknown endpoints as PII.
+func (reg *Registry) FailClosed() bool { return reg.failClosed }
 
 // RulesFor returns the PII field redaction rules for the given endpoint pattern.
 // Returns nil (empty slice) if no rules are registered for the pattern.
@@ -188,8 +202,29 @@ func (reg *Registry) RulesFor(endpointPattern string) []FieldRedaction {
 
 // IsFullBodyPII reports whether the entire response body for the given endpoint
 // pattern is considered PII.
+//
+// In fail-closed mode, any pattern that is neither in the full-body PII set,
+// the unconditional-rule set, nor the conditional-rule set is treated as
+// "unknown" and reported as full-body PII. This causes the logger to redact
+// the entire body rather than letting an unmapped endpoint leak fields by
+// default. Caller passes the *raw* (unclassified) path so we can tell the
+// difference between a known pattern and a pass-through path; that detection
+// is done via endpoint.ClassifyKnown by the caller before invoking us.
 func (reg *Registry) IsFullBodyPII(endpointPattern string) bool {
-	return reg.fullBodyEndpoints[endpointPattern]
+	if reg.fullBodyEndpoints[endpointPattern] {
+		return true
+	}
+	if !reg.failClosed {
+		return false
+	}
+	if len(reg.rules[endpointPattern]) > 0 {
+		return false
+	}
+	if len(reg.conditionalRules[endpointPattern]) > 0 {
+		return false
+	}
+	// Unmapped pattern in fail-closed mode: treat as full-body PII.
+	return true
 }
 
 // piiQueryValues maps query parameter names to the values that indicate PII.
@@ -210,13 +245,14 @@ var piiQueryValues = map[string]map[string]bool{
 //  5. If query params contain PII-bearing values  -  returns true:
 //     - "dataElements" with "buyerInfo" or "shippingAddress" (Orders v0)
 //     - "includedData" with "BUYER" or "RECIPIENT" (Orders v2026)
-//  6. Otherwise returns false.
+//  6. In fail-closed mode, an unrecognized SP-API path  -  returns true.
+//  7. Otherwise returns false.
 func (reg *Registry) ContainsPII(r *http.Request) bool {
 	if r.Method != http.MethodGet {
 		return false
 	}
 
-	pattern := endpoint.Classify(r.URL.Path)
+	pattern, known := endpoint.ClassifyKnown(r.URL.Path)
 
 	if reg.fullBodyEndpoints[pattern] {
 		return true
@@ -236,6 +272,10 @@ func (reg *Registry) ContainsPII(r *http.Request) bool {
 				}
 			}
 		}
+	}
+
+	if reg.failClosed && !known {
+		return true
 	}
 
 	return false

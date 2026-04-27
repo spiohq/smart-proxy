@@ -45,6 +45,9 @@ func main() {
 		slog.Error("invalid configuration", "error", err)
 		os.Exit(1)
 	}
+	for _, w := range cfg.Warnings() {
+		slog.Warn("configuration warning", "message", w)
+	}
 
 	resolver := merchant.NewResolver(nil)
 
@@ -61,7 +64,13 @@ func main() {
 	rlMiddleware := ratelimit.RateLimitMiddleware(limiter, &cfg.RateLimit)
 
 	// Cache + PII
-	registry := pii.NewRegistry()
+	var registry *pii.Registry
+	if cfg.PII.FailClosed {
+		registry = pii.NewRegistryFailClosed()
+		slog.Info("PII fail-closed mode enabled: unknown endpoints treated as PII")
+	} else {
+		registry = pii.NewRegistry()
+	}
 	var cacheMiddleware proxy.Middleware
 	var memCache *cache.MemoryCache
 	if cfg.Cache.Enabled {
@@ -251,12 +260,14 @@ func newBodyBackend(ctx context.Context, cfg *config.Config) (blob.Backend, erro
 		return blob.NewLocal(cfg.Bodies.BasePath)
 	case "s3":
 		return blob.NewS3(ctx, blob.S3Options{
-			Bucket:    cfg.Bodies.S3.Bucket,
-			Region:    cfg.Bodies.S3.Region,
-			Endpoint:  cfg.Bodies.S3.Endpoint,
-			AccessKey: cfg.Bodies.S3.AccessKey,
-			SecretKey: cfg.Bodies.S3.SecretKey,
-			PathStyle: cfg.Bodies.S3.PathStyle,
+			Bucket:      cfg.Bodies.S3.Bucket,
+			Region:      cfg.Bodies.S3.Region,
+			Endpoint:    cfg.Bodies.S3.Endpoint,
+			AccessKey:   cfg.Bodies.S3.AccessKey,
+			SecretKey:   cfg.Bodies.S3.SecretKey,
+			PathStyle:   cfg.Bodies.S3.PathStyle,
+			SSE:         cfg.Bodies.S3.SSE,
+			SSEKMSKeyID: cfg.Bodies.S3.SSEKMSKey,
 		})
 	default:
 		return nil, fmt.Errorf("unsupported bodies backend: %s", cfg.Bodies.Backend)

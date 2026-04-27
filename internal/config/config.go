@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -27,6 +28,14 @@ type CacheConfig struct {
 	MaxMemory  int64  // bytes, default 256 MB
 	DefaultTTL string // duration string, e.g. "60s"
 	ExcludePII bool   // when true, PII checker can skip caching
+}
+
+// PIIConfig holds PII engine settings.
+type PIIConfig struct {
+	// FailClosed makes the PII engine treat any path it does not recognize as
+	// PII-bearing. New SP-API endpoints added upstream are then redacted and
+	// excluded from cache by default until the registry is updated.
+	FailClosed bool
 }
 
 // StorageConfig holds database storage settings.
@@ -56,7 +65,9 @@ type S3Config struct {
 	Endpoint  string // Custom endpoint for MinIO/R2; empty for real AWS
 	AccessKey string
 	SecretKey string
-	PathStyle bool // Required for MinIO; harmless for AWS
+	PathStyle bool   // Required for MinIO; harmless for AWS
+	SSE       string // Server-side encryption: "" | "AES256" | "aws:kms" | "aws:kms:dsse"
+	SSEKMSKey string // KMS key ARN/alias for SSE=aws:kms{,:dsse}; optional
 }
 
 // PurgeConfig holds purge/retention settings for background jobs.
@@ -75,9 +86,13 @@ type PrometheusConfig struct {
 // Config holds all configuration for the proxy. Only ServerConfig is populated
 // in Phase 1  -  other sub-configs will be added in later phases.
 type Config struct {
+	// Env is "production" | "development" (default). In production mode the
+	// proxy refuses to start with insecure defaults (e.g. plain-http S3 endpoints).
+	Env        string
 	Server     ServerConfig
 	RateLimit  RateLimitConfig
 	Cache      CacheConfig
+	PII        PIIConfig
 	Storage    StorageConfig
 	Bodies     BodiesConfig
 	Purge      PurgeConfig
@@ -126,6 +141,7 @@ func loadConfig(logger *slog.Logger) *Config {
 		iBool = func(key string, fallback bool) bool { return envBoolLog(logger, key, fallback) }
 	}
 	return &Config{
+		Env: envStr("SP_PROXY_ENV", "development"),
 		Server: ServerConfig{
 			PortEU:          iInt("SP_PROXY_PORT_EU", 8080),
 			PortNA:          iInt("SP_PROXY_PORT_NA", 8081),
@@ -147,6 +163,9 @@ func loadConfig(logger *slog.Logger) *Config {
 			DefaultTTL: envStr("SP_PROXY_CACHE_DEFAULT_TTL", "60s"),
 			ExcludePII: iBool("SP_PROXY_CACHE_EXCLUDE_PII", true),
 		},
+		PII: PIIConfig{
+			FailClosed: iBool("SP_PROXY_PII_FAIL_CLOSED", false),
+		},
 		Storage: StorageConfig{
 			Backend:    envStr("SP_PROXY_STORAGE_BACKEND", "sqlite"),
 			SQLitePath: envStr("SP_PROXY_SQLITE_PATH", "/data/sp-proxy.db"),
@@ -167,6 +186,8 @@ func loadConfig(logger *slog.Logger) *Config {
 				AccessKey: envStr("SP_PROXY_S3_ACCESS_KEY", ""),
 				SecretKey: envStr("SP_PROXY_S3_SECRET_KEY", ""),
 				PathStyle: iBool("SP_PROXY_S3_PATH_STYLE", false),
+				SSE:       envStr("SP_PROXY_S3_SSE", ""),
+				SSEKMSKey: envStr("SP_PROXY_S3_SSE_KMS_KEY", ""),
 			},
 		},
 		Purge: PurgeConfig{
@@ -347,6 +368,14 @@ func (c *Config) Validate() error {
 			if c.Bodies.S3.Bucket == "" {
 				return fmt.Errorf("SP_PROXY_S3_BUCKET is required when SP_PROXY_BODIES_BACKEND=s3")
 			}
+			switch c.Bodies.S3.SSE {
+			case "", "AES256", "aws:kms", "aws:kms:dsse":
+			default:
+				return fmt.Errorf("invalid SP_PROXY_S3_SSE %q (want AES256|aws:kms|aws:kms:dsse)", c.Bodies.S3.SSE)
+			}
+			if c.IsProduction() && hasInsecureS3Endpoint(c.Bodies.S3.Endpoint) {
+				return fmt.Errorf("SP_PROXY_S3_ENDPOINT %q uses plain http; refuse to start in production (set SP_PROXY_ENV=development to override, or use https)", c.Bodies.S3.Endpoint)
+			}
 		default:
 			return fmt.Errorf("invalid SP_PROXY_BODIES_BACKEND %q (want local|s3)", c.Bodies.Backend)
 		}
@@ -373,4 +402,36 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// IsProduction reports whether SP_PROXY_ENV is set to production.
+// The check is case-insensitive.
+func (c *Config) IsProduction() bool {
+	return strings.EqualFold(c.Env, "production")
+}
+
+// Warnings returns non-fatal configuration concerns surfaced for logging.
+// In production these are upgraded to errors by Validate(); in development
+// they are advisory.
+func (c *Config) Warnings() []string {
+	var w []string
+	if c.Bodies.Enabled && c.Bodies.Backend == "s3" {
+		if hasInsecureS3Endpoint(c.Bodies.S3.Endpoint) {
+			w = append(w, fmt.Sprintf("SP_PROXY_S3_ENDPOINT %q uses plain http; SigV4 credentials and PII-redacted bodies travel unencrypted. Use https in production.", c.Bodies.S3.Endpoint))
+		}
+		if c.Bodies.S3.SSE == "" {
+			w = append(w, "SP_PROXY_S3_SSE is empty; relying on bucket-default encryption. Set SP_PROXY_S3_SSE=AES256 (or aws:kms) to enforce server-side encryption explicitly.")
+		}
+	}
+	return w
+}
+
+// hasInsecureS3Endpoint reports whether the configured endpoint is a plain-http URL.
+// An empty endpoint (real AWS) is always considered secure since the SDK uses https.
+func hasInsecureS3Endpoint(endpoint string) bool {
+	if endpoint == "" {
+		return false
+	}
+	lower := strings.ToLower(endpoint)
+	return strings.HasPrefix(lower, "http://")
 }

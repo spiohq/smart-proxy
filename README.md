@@ -64,6 +64,14 @@ If you build on Amazon's Selling Partner API, you know the pain: aggressive rate
 
 ---
 
+> **Security: do not expose Smart Proxy to the public internet.**
+>
+> The proxy is designed as a **sidecar / private-network component**. It accepts an `X-SP-Proxy-Merchant-Id` header to identify tenants; an unauthenticated public endpoint would let any caller self-claim any merchant key. The dashboard ships **without authentication**.
+>
+> Run it on loopback, on a private VPC subnet, or behind an authenticating reverse proxy (mTLS, OAuth, IP allowlist). See [SECURITY.md](SECURITY.md#deployment-requirements) for the full deployment checklist.
+
+---
+
 ## Quick Start
 
 ### Prerequisites
@@ -468,6 +476,21 @@ Whether you're building a private-label tool, an agency integration, or a full S
 ---
 
 ## Security
+
+### Deployment requirements
+
+Before running Smart Proxy with real SP-API traffic:
+
+1. **Do not expose it to the public internet.** Run as a sidecar, on a private VPC subnet, or behind an authenticating reverse proxy. The proxy honors `X-SP-Proxy-Merchant-Id` for tenant identification and has no built-in auth.
+2. **Protect the dashboard.** Port `9090` (default) ships without authentication. Bind it to a private interface or put it behind an auth layer.
+3. **Use encrypted volumes.** The proxy persists redacted bodies and request metadata to disk in plaintext; rely on EBS/LUKS/dm-crypt for at-rest protection. Tokens (LWA + RDT) live in process memory only and never hit disk.
+4. **Enforce S3 SSE.** When using `SP_PROXY_BODIES_BACKEND=s3`, set `SP_PROXY_S3_SSE` and add a deny-unencrypted-put bucket policy. See [docs/STORAGE.md#server-side-encryption](docs/STORAGE.md#server-side-encryption).
+5. **Use `https://` for S3 endpoints.** Plain `http://` MinIO endpoints leak SigV4 credentials and bodies on the wire.
+6. **Consider fail-closed PII.** Set `SP_PROXY_PII_FAIL_CLOSED=true` to redact any unmapped SP-API path by default. See [docs/DPP_COMPLIANCE.md#fail-closed-mode](docs/DPP_COMPLIANCE.md#fail-closed-mode).
+
+The full checklist lives in [SECURITY.md](SECURITY.md#deployment-requirements).
+
+### Reporting vulnerabilities
 
 If you discover a security vulnerability, please report it responsibly. See [SECURITY.md](SECURITY.md) for our disclosure policy and contact information.
 

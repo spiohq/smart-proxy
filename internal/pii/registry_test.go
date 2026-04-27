@@ -295,3 +295,107 @@ func mustParseURL(raw string) *url.URL {
 	return u
 }
 
+// ── Fail-closed mode ──────────────────────────────────────────────
+
+func TestNewRegistryFailClosed_FlagSet(t *testing.T) {
+	reg := NewRegistryFailClosed()
+	assert.True(t, reg.FailClosed())
+}
+
+func TestNewRegistry_FailClosedFlagDefaultsFalse(t *testing.T) {
+	assert.False(t, NewRegistry().FailClosed())
+}
+
+func TestFailClosed_UnknownEndpointTreatedAsFullBodyPII(t *testing.T) {
+	reg := NewRegistryFailClosed()
+	// Unknown classification: Classify returns the path unchanged when no
+	// pattern matches, and that path is in none of the rule maps.
+	assert.True(t, reg.IsFullBodyPII("/futureapi/2030-01-01/unknown"))
+}
+
+func TestFailClosed_PatternNotInRuleMapsIsFullBody(t *testing.T) {
+	// IsFullBodyPII operates on the classified pattern. In fail-closed mode,
+	// any pattern that is in none of the rule maps (full-body, partial,
+	// conditional) is reported as full-body. This includes both genuinely
+	// unknown paths AND known SP-API endpoints that simply have no PII rules.
+	// The latter is intentional: if we have not registered rules for an
+	// endpoint, we cannot prove it does not return PII, so we redact its
+	// body. Operators who want catalog/finances/etc readable in the
+	// dashboard should leave fail-closed off, or register stub rules.
+	reg := NewRegistryFailClosed()
+	assert.True(t, reg.IsFullBodyPII("/catalog/2022-04-01/items"))
+	assert.True(t, reg.IsFullBodyPII("/futureapi/2030-01-01/unknown"))
+}
+
+func TestFailClosed_KnownPIIEndpointStillFullBody(t *testing.T) {
+	reg := NewRegistryFailClosed()
+	assert.True(t, reg.IsFullBodyPII("/orders/v0/orders/{orderId}/buyerInfo"))
+}
+
+func TestFailClosed_KnownPartialPIIEndpointNotFullBody(t *testing.T) {
+	reg := NewRegistryFailClosed()
+	// /orders/v0/orders has unconditional partial-PII rules. It must NOT be
+	// reported as full-body even in fail-closed mode, so logging keeps the
+	// non-PII fields readable.
+	assert.False(t, reg.IsFullBodyPII("/orders/v0/orders"))
+}
+
+func TestFailClosed_KnownConditionalPIIEndpointNotFullBody(t *testing.T) {
+	reg := NewRegistryFailClosed()
+	// /orders/2026-01-01/orders has only conditional PII rules. It is in
+	// the registry, so it is not "unknown" and should not be flagged as
+	// full-body.
+	assert.False(t, reg.IsFullBodyPII("/orders/2026-01-01/orders"))
+}
+
+func TestFailClosed_ContainsPII_UnknownEndpoint(t *testing.T) {
+	reg := NewRegistryFailClosed()
+	r := &http.Request{
+		Method: http.MethodGet,
+		URL:    mustParseURL("/futureapi/2030-01-01/unknown"),
+	}
+	assert.True(t, reg.ContainsPII(r), "fail-closed must treat unknown SP-API paths as PII")
+}
+
+func TestFailClosed_ContainsPII_NonGETUnknownEndpoint(t *testing.T) {
+	// Even in fail-closed, non-GET cannot return cached PII (no caching of
+	// mutations), so ContainsPII stays false.
+	reg := NewRegistryFailClosed()
+	r := &http.Request{
+		Method: http.MethodPost,
+		URL:    mustParseURL("/futureapi/2030-01-01/unknown"),
+	}
+	assert.False(t, reg.ContainsPII(r))
+}
+
+func TestFailClosed_ContainsPII_KnownParameterizedNonPIIEndpoint(t *testing.T) {
+	// A known parameterized SP-API endpoint that has no PII rules:
+	// /catalog/2022-04-01/items/{asin} is registered (see endpoint/classify.go)
+	// and lives in no PII rule map. ClassifyKnown returns ok=true, so the
+	// fail-closed unknown-path branch does NOT trip. The endpoint is also
+	// not in the full-body PII set or partial rules; ContainsPII therefore
+	// returns false even in fail-closed mode.
+	reg := NewRegistryFailClosed()
+	r := &http.Request{
+		Method: http.MethodGet,
+		URL:    mustParseURL("/catalog/2022-04-01/items/B07XYZ123"),
+	}
+	assert.False(t, reg.ContainsPII(r))
+}
+
+func TestFailOpen_ContainsPII_UnknownEndpoint(t *testing.T) {
+	// Default mode (fail-open): unknown endpoints are NOT flagged.
+	reg := NewRegistry()
+	r := &http.Request{
+		Method: http.MethodGet,
+		URL:    mustParseURL("/futureapi/2030-01-01/unknown"),
+	}
+	assert.False(t, reg.ContainsPII(r))
+}
+
+func TestFailOpen_IsFullBodyPII_UnknownEndpoint(t *testing.T) {
+	// Default mode: unknown patterns are NOT full-body.
+	reg := NewRegistry()
+	assert.False(t, reg.IsFullBodyPII("/futureapi/2030-01-01/unknown"))
+}
+
