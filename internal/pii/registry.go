@@ -91,7 +91,19 @@ var DefaultPIIRules = map[string][]FieldRedaction{
 		{JSONPath: "$.payload.ScheduledPackageId.AmazonOrderId", Mode: RedactModeRedact},
 		{JSONPath: "$.payload.PackageDetails.PackagePickUpSlot.SlotId", Mode: RedactModeRedact},
 	},
-
+	"/orders/v0/orders/{orderId}/regulatedInfo": {
+		{JSONPath: "$.payload.RegulatedInformation.Fields[*].FieldValue", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.BuyerInfo.BuyerEmail", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.BuyerInfo.BuyerName", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShippingAddress.Name", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShippingAddress.AddressLine1", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShippingAddress.AddressLine2", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShippingAddress.AddressLine3", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShippingAddress.City", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShippingAddress.StateOrRegion", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShippingAddress.PostalCode", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShippingAddress.Phone", Mode: RedactModeRedact},
+	},
 }
 
 // ConditionalPIIRules maps endpoint patterns to PII field redaction rules

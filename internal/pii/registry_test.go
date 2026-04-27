@@ -399,3 +399,24 @@ func TestFailOpen_IsFullBodyPII_UnknownEndpoint(t *testing.T) {
 	assert.False(t, reg.IsFullBodyPII("/futureapi/2030-01-01/unknown"))
 }
 
+func TestRegulatedInfo_HasFieldRules(t *testing.T) {
+	reg := NewRegistry()
+	rules := reg.RulesFor("/orders/v0/orders/{orderId}/regulatedInfo")
+	assert.NotEmpty(t, rules, "expected rules for /orders/v0/orders/{orderId}/regulatedInfo")
+
+	var paths []string
+	for _, r := range rules {
+		paths = append(paths, r.JSONPath)
+	}
+	assert.Contains(t, paths, "$.payload.RegulatedInformation.Fields[*].FieldValue")
+	assert.Contains(t, paths, "$.payload.BuyerInfo.BuyerEmail")
+	assert.Contains(t, paths, "$.payload.ShippingAddress.AddressLine1")
+}
+
+func TestRegulatedInfo_NotFullBody(t *testing.T) {
+	reg := NewRegistry()
+	// regulatedInfo uses field rules (not full-body) so verification metadata
+	// stays visible for operator debugging while PII fields are redacted.
+	assert.False(t, reg.IsFullBodyPII("/orders/v0/orders/{orderId}/regulatedInfo"))
+}
+
