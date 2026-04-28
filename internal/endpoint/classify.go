@@ -104,15 +104,24 @@ var endpointPatterns = []struct {
 	// 5 segments
 	{"/shipping/v1/shipments/", 5, "", "/shipping/v1/shipments/{shipmentId}"},
 	{"/shipping/v1/tracking/", 5, "", "/shipping/v1/tracking/{trackingId}"},
+	// 4 segments (list/POST endpoint -- more specific patterns above)
+	{"/shipping/v1/shipments", 4, "", "/shipping/v1/shipments"},
 
 	// ── Shipping v2 ────────────────────────────────────────────────────
 	// 6 segments (disambiguated by suffix)
 	{"/shipping/v2/shipments/", 6, "cancel", "/shipping/v2/shipments/{shipmentId}/cancel"},
 	{"/shipping/v2/shipments/", 6, "documents", "/shipping/v2/shipments/{shipmentId}/documents"},
 	{"/shipping/v2/shipments/", 6, "directPurchase", "/shipping/v2/shipments/{shipmentId}/directPurchase"},
+	// 4 segments (list/POST endpoint -- more specific patterns above)
+	{"/shipping/v2/shipments", 4, "", "/shipping/v2/shipments"},
 
 	// ── Merchant Fulfillment v0 ────────────────────────────────────────
+	// 4 segments (list/POST endpoint -- before the 5-segment {shipmentId})
+	{"/mfn/v0/shipments", 4, "", "/mfn/v0/shipments"},
 	{"/mfn/v0/shipments/", 5, "", "/mfn/v0/shipments/{shipmentId}"},
+
+	// ── EasyShip ───────────────────────────────────────────────────────
+	{"/easyShip/2022-03-23/packages/bulk", 5, "", "/easyShip/2022-03-23/packages/bulk"},
 
 	// ── Notifications v1 ───────────────────────────────────────────────
 	{"/notifications/v1/subscriptions/", 5, "", "/notifications/v1/subscriptions/{type}"},

@@ -114,6 +114,11 @@ func TestClassify(t *testing.T) {
 			expected: "/mfn/v0/shipments",
 		},
 		{
+			name:     "easyShip bulk POST",
+			input:    "/easyShip/2022-03-23/packages/bulk",
+			expected: "/easyShip/2022-03-23/packages/bulk",
+		},
+		{
 			name:     "definitions product types list",
 			input:    "/definitions/2020-09-01/productTypes",
 			expected: "/definitions/2020-09-01/productTypes",
@@ -647,6 +652,30 @@ func TestClassifyKnown(t *testing.T) {
 			name:        "known parameterized path with query string",
 			input:       "/orders/v0/orders/123?foo=bar",
 			wantPattern: "/orders/v0/orders/{orderId}",
+			wantKnown:   true,
+		},
+		{
+			name:        "shipping v1 shipments POST list -- known",
+			input:       "/shipping/v1/shipments",
+			wantPattern: "/shipping/v1/shipments",
+			wantKnown:   true,
+		},
+		{
+			name:        "shipping v2 shipments POST list -- known",
+			input:       "/shipping/v2/shipments",
+			wantPattern: "/shipping/v2/shipments",
+			wantKnown:   true,
+		},
+		{
+			name:        "mfn v0 shipments POST list -- known",
+			input:       "/mfn/v0/shipments",
+			wantPattern: "/mfn/v0/shipments",
+			wantKnown:   true,
+		},
+		{
+			name:        "easyShip bulk POST -- known",
+			input:       "/easyShip/2022-03-23/packages/bulk",
+			wantPattern: "/easyShip/2022-03-23/packages/bulk",
 			wantKnown:   true,
 		},
 		{

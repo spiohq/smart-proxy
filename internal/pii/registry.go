@@ -189,6 +189,93 @@ var ConditionalPIIRules = map[string][]FieldRedaction{
 	},
 }
 
+// DefaultRequestBodyPIIRules maps endpoint patterns to PII field redaction
+// rules that apply to non-GET request bodies. Only endpoints whose Amazon-
+// published request schema explicitly includes PII fields are listed; off-
+// schema callers (e.g. PII placed in /feeds/2021-06-30/feeds) are not
+// addressed here on principle. Heuristic body-PII detection is rejected as
+// fragile and non-deterministic.
+//
+// Symmetry note: every entry here has a sibling rule on the response side
+// (DefaultPIIRules or DefaultFullBodyPIIEndpoints); the request-body rule
+// set documents the same buyer-data channel from the other direction.
+var DefaultRequestBodyPIIRules = map[string][]FieldRedaction{
+	// Messaging: free-form seller-to-buyer text. Redact the entire text.
+	"/messaging/v1/orders/{orderId}/messages/createConfirmServiceDetails": {
+		{JSONPath: "$.message.text", Mode: RedactModeRedact},
+	},
+	"/messaging/v1/orders/{orderId}/messages/createConfirmDeliveryDetails": {
+		{JSONPath: "$.message.text", Mode: RedactModeRedact},
+	},
+	"/messaging/v1/orders/{orderId}/messages/createUnexpectedProblem": {
+		{JSONPath: "$.message.text", Mode: RedactModeRedact},
+	},
+	"/messaging/v1/orders/{orderId}/messages/createConfirmOrderDetails": {
+		{JSONPath: "$.message.text", Mode: RedactModeRedact},
+	},
+	"/messaging/v1/orders/{orderId}/messages/createWarranty": {
+		{JSONPath: "$.message.text", Mode: RedactModeRedact},
+	},
+	"/messaging/v1/orders/{orderId}/messages/createDigitalAccessKey": {
+		{JSONPath: "$.message.text", Mode: RedactModeRedact},
+	},
+	"/messaging/v1/orders/{orderId}/messages/createLegalDisclosure": {
+		{JSONPath: "$.message.text", Mode: RedactModeRedact},
+	},
+	"/messaging/v1/orders/{orderId}/messages/createAmazonMotors": {
+		{JSONPath: "$.message.text", Mode: RedactModeRedact},
+	},
+	"/messaging/v1/orders/{orderId}/messages/sendInvoice": {
+		{JSONPath: "$.message.text", Mode: RedactModeRedact},
+	},
+	"/messaging/v1/orders/{orderId}/messages/confirmCustomizationDetails": {
+		{JSONPath: "$.message.text", Mode: RedactModeRedact},
+	},
+
+	// MFN createShipment: ShipToAddress is buyer-PII; ShipFromAddress is
+	// seller's own warehouse and is NOT redacted.
+	"/mfn/v0/shipments": {
+		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.Name", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.AddressLine1", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.AddressLine2", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.AddressLine3", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.City", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.StateOrProvinceCode", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.PostalCode", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.Phone", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.Email", Mode: RedactModeRedact},
+	},
+
+	// Shipping v1 / v2 purchaseShipment: shipTo is buyer-PII.
+	"/shipping/v1/shipments": {
+		{JSONPath: "$.shipTo.name", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.addressLine1", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.addressLine2", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.addressLine3", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.city", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.stateOrRegion", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.postalCode", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.phoneNumber", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.email", Mode: RedactModeRedact},
+	},
+	"/shipping/v2/shipments": {
+		{JSONPath: "$.shipTo.name", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.addressLine1", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.addressLine2", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.addressLine3", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.city", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.stateOrRegion", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.postalCode", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.phoneNumber", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.email", Mode: RedactModeRedact},
+	},
+
+	// EasyShip bulk: full-body redaction (per-buyer pickup details).
+	"/easyShip/2022-03-23/packages/bulk": {
+		{JSONPath: "$", Mode: RedactModeRedact},
+	},
+}
+
 // DefaultFullBodyPIIEndpoints lists endpoint patterns whose entire response body
 // is considered PII and should not be cached.
 var DefaultFullBodyPIIEndpoints = map[string]bool{
@@ -202,6 +289,7 @@ var DefaultFullBodyPIIEndpoints = map[string]bool{
 type Registry struct {
 	rules             map[string][]FieldRedaction
 	conditionalRules  map[string][]FieldRedaction
+	requestBodyRules  map[string][]FieldRedaction
 	fullBodyEndpoints map[string]bool
 	failClosed        bool
 	queryParamsExtra  map[string]bool
@@ -212,6 +300,7 @@ func NewRegistry() *Registry {
 	return &Registry{
 		rules:             DefaultPIIRules,
 		conditionalRules:  ConditionalPIIRules,
+		requestBodyRules:  DefaultRequestBodyPIIRules,
 		fullBodyEndpoints: DefaultFullBodyPIIEndpoints,
 	}
 }
@@ -310,6 +399,101 @@ func (reg *Registry) IsFullBodyPII(endpointPattern string) bool {
 var piiQueryValues = map[string]map[string]bool{
 	"dataElements": {"buyerInfo": true, "shippingAddress": true},
 	"includedData": {"BUYER": true, "RECIPIENT": true},
+}
+
+// messagingPOSTActions enumerates the action names that appear after
+// /messaging/v1/orders/{orderId}/messages/. The classifier collapses these
+// onto the 7-segment GET pattern /messaging/v1/orders/{orderId}/messages/
+// {messageId} because it is method-blind, so the registry needs its own
+// method-aware lookup for them.
+var messagingPOSTActions = map[string]bool{
+	"createConfirmServiceDetails":  true,
+	"createConfirmDeliveryDetails": true,
+	"createUnexpectedProblem":      true,
+	"createConfirmOrderDetails":    true,
+	"createWarranty":               true,
+	"createDigitalAccessKey":       true,
+	"createLegalDisclosure":        true,
+	"createAmazonMotors":           true,
+	"sendInvoice":                  true,
+	"confirmCustomizationDetails":  true,
+}
+
+// classifyMessagingPOST returns the messaging-action pattern when r is a
+// POST against one of the known message-action sub-paths, or "" otherwise.
+func classifyMessagingPOST(r *http.Request) string {
+	if r.Method != http.MethodPost {
+		return ""
+	}
+	const prefix = "/messaging/v1/orders/"
+	const middle = "/messages/"
+	path := r.URL.Path
+	if !strings.HasPrefix(path, prefix) {
+		return ""
+	}
+	rest := path[len(prefix):]
+	idx := strings.Index(rest, middle)
+	if idx == -1 {
+		return ""
+	}
+	action := rest[idx+len(middle):]
+	if action == "" || strings.ContainsRune(action, '/') {
+		return ""
+	}
+	if !messagingPOSTActions[action] {
+		return ""
+	}
+	return "/messaging/v1/orders/{orderId}/messages/" + action
+}
+
+// RequestBodyRulesFor returns the request-body PII rules registered for the
+// given endpoint pattern. Returns nil if none. Symmetric with RulesFor.
+func (reg *Registry) RequestBodyRulesFor(endpointPattern string) []FieldRedaction {
+	return reg.requestBodyRules[endpointPattern]
+}
+
+// classifyRequestBody returns the canonical pattern key used to look up
+// request-body PII rules for r, plus whether the lookup found rules and
+// whether the SP-API path was recognized at all.
+func (reg *Registry) classifyRequestBody(r *http.Request) (pattern string, hasRules bool, known bool) {
+	if msg := classifyMessagingPOST(r); msg != "" {
+		return msg, len(reg.requestBodyRules[msg]) > 0, true
+	}
+	p, ok := endpoint.ClassifyKnown(r.URL.Path)
+	return p, len(reg.requestBodyRules[p]) > 0, ok
+}
+
+// RequestBodyContainsPII reports whether the request body for r is expected
+// to contain PII per Amazon's published schema.
+func (reg *Registry) RequestBodyContainsPII(r *http.Request) bool {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+		return false
+	}
+	_, hasRules, known := reg.classifyRequestBody(r)
+	if hasRules {
+		return true
+	}
+	if reg.failClosed && !known {
+		return true
+	}
+	return false
+}
+
+// RequestBodyPattern returns the pattern key callers should use to look up
+// request-body redaction rules for r. Returns "" when r is not a request
+// that has request-body PII rules.
+func (reg *Registry) RequestBodyPattern(r *http.Request) string {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+		return ""
+	}
+	p, hasRules, known := reg.classifyRequestBody(r)
+	if hasRules {
+		return p
+	}
+	if reg.failClosed && !known {
+		return p // raw path; engine treats unrecognized as full-body
+	}
+	return ""
 }
 
 // ContainsPII reports whether the given request may return PII data.

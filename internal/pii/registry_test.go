@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewRegistry_HasDefaultRules(t *testing.T) {
@@ -525,4 +526,92 @@ func TestRegistry_SetFailClosed(t *testing.T) {
 	assert.False(t, reg.FailClosed())
 	reg.SetFailClosed(true)
 	assert.True(t, reg.FailClosed())
+}
+
+func TestRequestBodyContainsPII_KnownEndpoints(t *testing.T) {
+	reg := NewRegistry()
+
+	cases := []struct {
+		method, path string
+		want         bool
+	}{
+		// Schema-PII POST endpoints
+		{"POST", "/messaging/v1/orders/903-3489051-5871062/messages/createConfirmServiceDetails", true},
+		{"POST", "/messaging/v1/orders/903-3489051-5871062/messages/createUnexpectedProblem", true},
+		{"POST", "/mfn/v0/shipments", true},
+		{"POST", "/shipping/v1/shipments", true},
+		{"POST", "/shipping/v2/shipments", true},
+		{"POST", "/easyShip/2022-03-23/packages/bulk", true},
+
+		// Off-schema endpoints stay false
+		{"POST", "/feeds/2021-06-30/feeds", false},
+		{"POST", "/catalog/2022-04-01/items", false},
+
+		// GETs always false
+		{"GET", "/orders/v0/orders", false},
+		{"GET", "/messaging/v1/orders/903-3489051-5871062/messages/some-message-id", false},
+
+		// Unknown messaging action is treated as the GET-pattern (no rules), so false
+		{"POST", "/messaging/v1/orders/903-3489051-5871062/messages/notARealAction", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			r := &http.Request{Method: tc.method, URL: mustParseURL(tc.path)}
+			assert.Equal(t, tc.want, reg.RequestBodyContainsPII(r))
+		})
+	}
+}
+
+func TestRequestBodyContainsPII_FailClosed_UnknownPostIsTrue(t *testing.T) {
+	reg := NewRegistryFailClosed()
+	r := &http.Request{Method: "POST", URL: mustParseURL("/futureapi/2030-01-01/unknown")}
+	assert.True(t, reg.RequestBodyContainsPII(r),
+		"fail-closed: unknown POST paths must be treated as request-body PII")
+}
+
+func TestRequestBodyRulesFor_MessagingFullBody(t *testing.T) {
+	reg := NewRegistry()
+	rules := reg.RequestBodyRulesFor("/messaging/v1/orders/{orderId}/messages/createConfirmServiceDetails")
+	require.NotEmpty(t, rules)
+	assert.Equal(t, "$.message.text", rules[0].JSONPath)
+}
+
+func TestRequestBodyRulesFor_MfnShipToAddress(t *testing.T) {
+	reg := NewRegistry()
+	rules := reg.RequestBodyRulesFor("/mfn/v0/shipments")
+	require.NotEmpty(t, rules)
+
+	var paths []string
+	for _, r := range rules {
+		paths = append(paths, r.JSONPath)
+	}
+	assert.Contains(t, paths, "$.ShipmentRequestDetails.ShipToAddress.Name")
+	assert.Contains(t, paths, "$.ShipmentRequestDetails.ShipToAddress.Email")
+	assert.Contains(t, paths, "$.ShipmentRequestDetails.ShipToAddress.AddressLine1")
+	assert.Contains(t, paths, "$.ShipmentRequestDetails.ShipToAddress.Phone")
+	assert.NotContains(t, paths, "$.ShipmentRequestDetails.ShipFromAddress.Name",
+		"ShipFromAddress is the seller's warehouse, not buyer PII; must not be redacted")
+}
+
+func TestRequestBodyPattern_RoundTrips(t *testing.T) {
+	// RequestBodyPattern must return a key that RequestBodyRulesFor can resolve.
+	reg := NewRegistry()
+	cases := []struct {
+		method, path string
+	}{
+		{"POST", "/messaging/v1/orders/903-3489051-5871062/messages/createConfirmServiceDetails"},
+		{"POST", "/mfn/v0/shipments"},
+		{"POST", "/shipping/v1/shipments"},
+		{"POST", "/easyShip/2022-03-23/packages/bulk"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			r := &http.Request{Method: tc.method, URL: mustParseURL(tc.path)}
+			pat := reg.RequestBodyPattern(r)
+			require.NotEmpty(t, pat)
+			rules := reg.RequestBodyRulesFor(pat)
+			assert.NotEmpty(t, rules, "pattern %q should resolve to non-empty rules", pat)
+		})
+	}
 }
