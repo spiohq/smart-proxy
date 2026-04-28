@@ -178,33 +178,83 @@ Smart Proxy refuses to start in production mode if `SP_PROXY_S3_ENDPOINT` is pla
 
 ### 4.4 §1.7 deletion procedure
 
-When Amazon issues a §1.7 deletion notice for a specific merchant, the operator must purge that merchant's data from Smart Proxy storage. Concrete commands:
+When Amazon issues a §1.7 deletion notice for a specific merchant, the operator must purge that merchant's data from Smart Proxy storage. The procedure below is correct against the storage layout described in [docs/STORAGE.md](STORAGE.md): SQLite holds `request_logs` rows that point at JSONL body files via `body_file`, `body_offset`, `body_length`. The merchant key is stored only in SQLite; JSONL body entries do not carry it.
+
+**Important constraints to read before running the procedure:**
+
+- JSONL files are append-only and pack multiple merchants' bodies into the same hourly file. There is no in-place "delete only this merchant's bytes" tool today; the operator chooses between (a) deleting the affected files entirely (coarse: also drops other merchants' bodies in the same hour) or (b) rewriting the file by filtering on the entry IDs that belong to the merchant.
+- The audit log is a separate concern. DPP §1.7 requires deletion of *PII*, not deletion of the audit trail that proves PII was processed. Smart Proxy audit-log messages are operator events (boot warnings, config changes, purge-job runs); they do not contain request payloads. Preserve audit_log entries as compliance evidence; do not blanket-delete them.
+
+**Concrete commands:**
 
 ```bash
-# 1. Stop accepting new requests for the merchant (firewall, app-side switch).
+# 1. Stop accepting new requests for the merchant (firewall or app-side switch).
 
-# 2. Purge SQLite request_logs and audit_log for the merchant.
+# 2. Identify the JSONL files and entry IDs that hold the merchant's bodies.
+sqlite3 /data/sp-proxy.db <<EOF
+.headers on
+.mode csv
+SELECT id, body_file, body_offset, body_length
+FROM request_logs
+WHERE merchant_key = 'TARGET_MERCHANT_KEY'
+  AND body_file != '';
+EOF
+# Save the output. Group rows by body_file: each file may need rewriting
+# OR (if no other merchants used the proxy in that hour) outright deletion.
+
+# 3. Rewrite each affected JSONL file, dropping lines whose "id" matches a
+#    merchant request id from step 2. Example using jq for one file:
+#
+#    ids=$(sqlite3 /data/sp-proxy.db "SELECT id FROM request_logs \
+#       WHERE merchant_key='TARGET_MERCHANT_KEY' \
+#       AND body_file='2026-04-27-14.jsonl';" | paste -sd, -)
+#    jq -c --arg ids "$ids" 'select(($ids|split(","))|index(.id)|not)' \
+#       /data/bodies/current/2026-04-27-14.jsonl > /tmp/clean.jsonl
+#    mv /tmp/clean.jsonl /data/bodies/current/2026-04-27-14.jsonl
+#
+# Repeat for every file in step 2's output. The recent/ tier holds plain
+# JSONL; the archive/ tier is zstd-compressed and must be decompressed,
+# filtered, recompressed (zstd -d FILE.zst | jq ... | zstd -o FILE.zst).
+
+# 4. Drop the SQLite metadata rows AND clear any remaining body pointers
+#    that point at files we just rewrote. The audit_log is preserved.
 sqlite3 /data/sp-proxy.db <<EOF
 DELETE FROM request_logs WHERE merchant_key = 'TARGET_MERCHANT_KEY';
-DELETE FROM audit_log WHERE source = 'merchant' AND message LIKE '%TARGET_MERCHANT_KEY%';
 VACUUM;
 EOF
 
-# 3. Purge JSONL bodies. Bodies are stored by hour, not by merchant; the
-#    merchant key is inside each line. You must rewrite the affected files:
-for f in /data/bodies/current/*.jsonl /data/bodies/recent/*.jsonl; do
-    grep -v '"merchant_key":"TARGET_MERCHANT_KEY"' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
-done
-# Archive tier is compressed; decompress, filter, recompress as needed.
-
-# 4. Restart the proxy to drop in-memory caches.
+# 5. Restart the proxy to drop in-memory caches.
 docker restart smart-proxy
 
-# 5. Document the deletion (timestamp, merchant key, files touched) for the
-#    Amazon §1.7 certification response.
+# 6. Append a §1.7 compliance event to the audit log (NOT to request_logs)
+#    so the audit trail records the deletion. This is the evidence Amazon
+#    will ask for in the §1.7 certification response.
+sqlite3 /data/sp-proxy.db <<EOF
+INSERT INTO audit_log (id, timestamp, source, event_type, message, metadata)
+VALUES (
+  lower(hex(randomblob(16))),
+  datetime('now'),
+  'operator',
+  'dpp_section_1_7_deletion',
+  'Deletion completed for merchant TARGET_MERCHANT_KEY',
+  json_object('merchant_key', 'TARGET_MERCHANT_KEY')
+);
+EOF
 ```
 
-Test this procedure on a non-production data set before you need it under time pressure.
+Verify the deletion was complete:
+
+```bash
+# 7. Verify: SQLite has no request_logs rows for the merchant.
+sqlite3 /data/sp-proxy.db \
+  "SELECT count(*) FROM request_logs WHERE merchant_key = 'TARGET_MERCHANT_KEY';"
+# Expected: 0
+
+# 8. Verify: no JSONL line carries an id that previously belonged to the
+#    merchant. (This is a probabilistic check; rely on step 2's id list.)
+```
+
+**Until an automated `smart-proxy purge --merchant=...` CLI lands, test this procedure end-to-end on a non-production data set every quarter.** A deletion notice that is partially honored is worse than one that is not honored at all: it creates a paper trail of compliance that does not match disk state.
 
 ## 5. Configuration reference
 
