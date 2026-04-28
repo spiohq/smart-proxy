@@ -110,9 +110,12 @@ func (s *Server) Start() error {
 		return fmt.Errorf("listen dashboard port %d: %w", sc.PortDashboard, err)
 	}
 
-	// Same rationale as the region server: ReadHeaderTimeout for Slowloris,
-	// IdleTimeout for Keep-Alive slot recycling. Dashboard responses can
-	// stream large JSONL bodies; WriteTimeout would cap them artificially.
+	// Same rationale as the region server: ReadHeaderTimeout closes the
+	// Slowloris vector, IdleTimeout recycles Keep-Alive slots. ReadTimeout
+	// and WriteTimeout are left at zero so streaming JSONL log responses
+	// are not artificially capped, and so the configuration stays
+	// symmetric with the region server (operators read both sites and the
+	// asymmetry would invite a "fix" that breaks queue-mode requests).
 	dashSrv := &http.Server{
 		Handler:           s.dashboardHandler,
 		ReadHeaderTimeout: 10 * time.Second,
