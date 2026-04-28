@@ -3,8 +3,10 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -192,4 +194,54 @@ func TestDashboardBindAddr_ExplicitWildcard(t *testing.T) {
 	// depending on dual-stack behaviour. Either is correct.
 	assert.True(t, host == "0.0.0.0" || host == "::",
 		"wildcard bind expected 0.0.0.0 or ::, got %q", host)
+}
+
+// waitForRegionAddr polls srv.RegionAddr(region) until it is non-empty or 2s
+// have elapsed.
+func waitForRegionAddr(t *testing.T, srv *Server, region Region) string {
+	t.Helper()
+	var addr string
+	require.Eventually(t, func() bool {
+		addr = srv.RegionAddr(region)
+		return addr != ""
+	}, 2*time.Second, 20*time.Millisecond, "region %s never started", region)
+	return addr
+}
+
+// TestRegionServer_ReadHeaderTimeout verifies that the region server closes
+// a connection whose HTTP headers are never completed (Slowloris defense).
+func TestRegionServer_ReadHeaderTimeout(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			PortEU:          freePort(t),
+			PortNA:          0,
+			PortFE:          0,
+			PortDashboard:   freePort(t),
+			RegionBindAddr:  "127.0.0.1",
+			ShutdownTimeout: "5s",
+		},
+	}
+
+	srv, err := New(cfg, func(region Region) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+	}, nil)
+	require.NoError(t, err)
+	go srv.Start()
+	defer srv.Shutdown()
+
+	addr := waitForRegionAddr(t, srv, RegionEU)
+
+	conn, err := net.Dial("tcp", addr)
+	require.NoError(t, err)
+	defer conn.Close()
+	// Send an incomplete HTTP request -- headers are never terminated.
+	_, _ = conn.Write([]byte("GET / HTTP/1.1\r\nHost: x\r\n"))
+
+	conn.SetDeadline(time.Now().Add(15 * time.Second))
+	buf := make([]byte, 1024)
+	_, err = conn.Read(buf)
+	require.True(t, err == io.EOF || strings.Contains(string(buf), "HTTP/1.1 4"),
+		"expected server to close slow header connection within 15s; got err=%v buf=%q", err, buf[:64])
 }

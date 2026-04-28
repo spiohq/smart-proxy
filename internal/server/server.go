@@ -78,7 +78,18 @@ func (s *Server) Start() error {
 			return fmt.Errorf("listen %s port %d: %w", region, port, err)
 		}
 
-		httpSrv := &http.Server{Handler: handler}
+		// Timeouts: only ReadHeaderTimeout and IdleTimeout are set. ReadTimeout
+		// and WriteTimeout would conflict with the rate-limiter's queueing
+		// behavior -- ThrottleModeQueue can legitimately hold a request for
+		// minutes (cfg.RateLimit.QueueTimeout, up to 10min for some
+		// operations), and large feed/MFN-bulk uploads can take a while too.
+		// ReadHeaderTimeout closes the actual Slowloris vector (header-only
+		// floods); IdleTimeout recycles Keep-Alive slots.
+		httpSrv := &http.Server{
+			Handler:           handler,
+			ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout:       120 * time.Second,
+		}
 
 		s.mu.Lock()
 		s.regionServers[region] = httpSrv
@@ -99,7 +110,14 @@ func (s *Server) Start() error {
 		return fmt.Errorf("listen dashboard port %d: %w", sc.PortDashboard, err)
 	}
 
-	dashSrv := &http.Server{Handler: s.dashboardHandler}
+	// Same rationale as the region server: ReadHeaderTimeout for Slowloris,
+	// IdleTimeout for Keep-Alive slot recycling. Dashboard responses can
+	// stream large JSONL bodies; WriteTimeout would cap them artificially.
+	dashSrv := &http.Server{
+		Handler:           s.dashboardHandler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 
 	s.mu.Lock()
 	s.dashboardServer = dashSrv
