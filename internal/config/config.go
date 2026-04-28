@@ -116,6 +116,7 @@ type ServerConfig struct {
 	PortFE            int
 	PortDashboard     int
 	DashboardBindAddr string // SP_PROXY_DASHBOARD_BIND_ADDR; "127.0.0.1" by default
+	RegionBindAddr    string // SP_PROXY_REGION_BIND_ADDR; "127.0.0.1" by default
 	ShutdownTimeout   string
 }
 
@@ -150,6 +151,7 @@ func loadConfig(logger *slog.Logger) *Config {
 			PortFE:            iInt("SP_PROXY_PORT_FE", 8082),
 			PortDashboard:     iInt("SP_PROXY_PORT_DASHBOARD", 9090),
 			DashboardBindAddr: envStr("SP_PROXY_DASHBOARD_BIND_ADDR", "127.0.0.1"),
+			RegionBindAddr:    envStr("SP_PROXY_REGION_BIND_ADDR", "127.0.0.1"),
 			ShutdownTimeout:   envStr("SP_PROXY_SHUTDOWN_TIMEOUT", "30s"),
 		},
 		RateLimit: RateLimitConfig{
@@ -468,6 +470,9 @@ func (c *Config) Warnings() []string {
 	}
 	if c.Server.DashboardBindAddr != "127.0.0.1" && c.Server.DashboardBindAddr != "::1" && c.Server.DashboardBindAddr != "localhost" {
 		w = append(w, fmt.Sprintf("SP_PROXY_DASHBOARD_BIND_ADDR=%q is non-loopback in production: ensure an authenticating reverse proxy is in front of the dashboard.", c.Server.DashboardBindAddr))
+	}
+	if c.Server.RegionBindAddr != "127.0.0.1" && c.Server.RegionBindAddr != "::1" && c.Server.RegionBindAddr != "localhost" {
+		w = append(w, fmt.Sprintf("SP_PROXY_REGION_BIND_ADDR=%q is non-loopback in production: callers can reach the proxy without network-level access control. The proxy reads X-SP-Proxy-Merchant-Id without authentication and any reachable client can self-claim any merchant identity.", c.Server.RegionBindAddr))
 	}
 
 	return w

@@ -493,3 +493,33 @@ func TestProductionWarnings_DevelopmentSilent(t *testing.T) {
 			"DPP warnings must be production-only")
 	}
 }
+
+func TestLoad_RegionBindAddr_Default(t *testing.T) {
+	t.Setenv("SP_PROXY_PORT_EU", "8080")
+	cfg := Load()
+	assert.Equal(t, "127.0.0.1", cfg.Server.RegionBindAddr,
+		"RegionBindAddr defaults to 127.0.0.1 (loopback-only sidecar)")
+}
+
+func TestLoad_RegionBindAddr_FromEnv(t *testing.T) {
+	t.Setenv("SP_PROXY_PORT_EU", "8080")
+	t.Setenv("SP_PROXY_REGION_BIND_ADDR", "0.0.0.0")
+	cfg := Load()
+	assert.Equal(t, "0.0.0.0", cfg.Server.RegionBindAddr)
+}
+
+func TestWarnings_NonLoopbackRegionBindInProduction(t *testing.T) {
+	t.Setenv("SP_PROXY_PORT_EU", "8080")
+	t.Setenv("SP_PROXY_REGION_BIND_ADDR", "0.0.0.0")
+	t.Setenv("SP_PROXY_ENV", "production")
+	cfg := Load()
+	warnings := cfg.Warnings()
+	var found bool
+	for _, w := range warnings {
+		if strings.Contains(w, "SP_PROXY_REGION_BIND_ADDR") && strings.Contains(w, "non-loopback") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "production + non-loopback region bind must emit a warning, got %v", warnings)
+}
