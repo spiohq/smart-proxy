@@ -154,12 +154,8 @@ func NewTestEnv(t *testing.T, opts ...Option) *TestEnv {
 	limiter := ratelimit.NewLimiter(cfg.RateLimit.ThrottleFactor, cfg.RateLimit.QueueMaxDepth)
 	rlMiddleware := ratelimit.RateLimitMiddleware(limiter, &cfg.RateLimit)
 
-	var registry *pii.Registry
-	if extras.piiFailClose {
-		registry = pii.NewRegistryFailClosed()
-	} else {
-		registry = pii.NewRegistry()
-	}
+	registry := pii.NewRegistryWithExtras(cfg.PII.QueryParamsExtra)
+	registry.SetFailClosed(extras.piiFailClose || cfg.PII.FailClosed)
 	var cacheMiddleware proxy.Middleware
 	if cfg.Cache.Enabled {
 		mc := cache.NewMemoryCache(cfg.Cache.MaxMemory)

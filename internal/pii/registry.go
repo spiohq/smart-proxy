@@ -217,9 +217,13 @@ func NewRegistry() *Registry {
 }
 
 // NewRegistryFailClosed returns a Registry that treats any path not matching
-// a registered SP-API endpoint pattern as PII-bearing. Use this in
-// production-style deployments where adding a new SP-API endpoint upstream
-// must not silently bypass redaction until the registry is updated.
+// a registered SP-API endpoint pattern as PII-bearing.
+//
+// Deprecated: use NewRegistryWithExtras(nil) followed by SetFailClosed(true).
+// The two-step builder is the canonical construction path, used by
+// cmd/smart-proxy/main.go to wire the Registry from PIIConfig (FailClosed
+// flag plus operator-supplied query-param extras). This helper is kept only
+// for tests that predate the builder path.
 func NewRegistryFailClosed() *Registry {
 	r := NewRegistry()
 	r.failClosed = true

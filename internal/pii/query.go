@@ -18,15 +18,19 @@ const queryRedactedValue = "%5BREDACTED%5D"
 // RedactQueryString returns rawQuery with values of PII-bearing parameters
 // replaced by the URL-encoded marker "[REDACTED]". Parameter order is
 // preserved. Empty input returns empty output. Unknown parameter names
-// pass through untouched. The extra map is checked in addition to
-// DefaultPIIQueryParams; keys in extra MUST already be lower-cased.
-// Failure mode for non-lower-cased extras is silent (no redaction); see
-// TestRedactQueryString_ExtrasMustBeLowercase for the contract.
+// pass through untouched.
+//
+// extraLower contains additional PII parameter names. The map keys MUST
+// already be lower-cased; the parameter name encodes the contract so callers
+// cannot accidentally pass a mixed-case map. NewRegistryWithExtras and the
+// SP_PROXY_PII_QUERY_PARAMS env-var path both lower-case before storing, so
+// in-tree callers never have to think about it. External callers building
+// the map by hand should call strings.ToLower on each key.
 //
 // The function does not parse-then-reserialize via net/url because that
 // would lose duplicate keys and reorder parameters. Instead it walks the
 // raw string by '&' splits.
-func RedactQueryString(rawQuery string, extra map[string]bool) string {
+func RedactQueryString(rawQuery string, extraLower map[string]bool) string {
 	if rawQuery == "" {
 		return ""
 	}
@@ -35,12 +39,12 @@ func RedactQueryString(rawQuery string, extra map[string]bool) string {
 	for i, part := range parts {
 		eq := strings.IndexByte(part, '=')
 		if eq < 0 {
-			// No '=' -- key only, no value to redact.
+			// No '=': key only, no value to redact.
 			continue
 		}
 		key := part[:eq]
 		lowered := strings.ToLower(key)
-		if DefaultPIIQueryParams[lowered] || (extra != nil && extra[lowered]) {
+		if DefaultPIIQueryParams[lowered] || (extraLower != nil && extraLower[lowered]) {
 			parts[i] = key + "=" + queryRedactedValue
 		}
 	}
