@@ -2,9 +2,13 @@ services:
   smart-proxy:
     image: ghcr.io/spiohq/smart-proxy:latest
     ports:
-      - "8080:8080"   # EU region
-      - "8081:8081"   # NA region
-      - "8082:8082"   # FE region
+      # Region ports loopback-only by default. The proxy reads
+      # X-SP-Proxy-Merchant-Id without authentication; exposing the region
+      # ports to a network where any caller can self-claim a merchant
+      # identity is a deliberate operator choice. See SECURITY.md.
+      - "127.0.0.1:8080:8080"   # EU region
+      - "127.0.0.1:8081:8081"   # NA region
+      - "127.0.0.1:8082:8082"   # FE region
       # Dashboard host-side mapping is loopback-only by default. The dashboard
       # ships without authentication; expose to the network only behind an
       # authenticating reverse proxy. See SECURITY.md and docs/DPP_COMPLIANCE.md.
