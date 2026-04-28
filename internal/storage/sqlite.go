@@ -34,6 +34,9 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	// process umask (typically 0o644 on Unix), not the main DB file's mode,
 	// so we have to chmod each one explicitly. Missing files are tolerated
 	// for the first-run case where the WAL has not yet been flushed.
+	// Maintain() uses PRAGMA wal_checkpoint(TRUNCATE), which zeroes the WAL
+	// in place rather than recreating the inode, so this chmod persists
+	// for the lifetime of the process.
 	if path != ":memory:" {
 		for _, p := range []string{path, path + "-wal", path + "-shm"} {
 			if err := os.Chmod(p, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
