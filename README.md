@@ -215,6 +215,7 @@ All configuration is via environment variables. See [`deploy/example.env`](deplo
 | `SP_PROXY_PORT_DASHBOARD` | `9090` | Dashboard web UI port |
 | `SP_PROXY_SHUTDOWN_TIMEOUT` | `30s` | Graceful shutdown timeout |
 | `SP_PROXY_DASHBOARD_BIND_ADDR` | `127.0.0.1` | Bind address for the dashboard listener. Use `0.0.0.0` only when running in a container with host-side `127.0.0.1` port mapping in front. |
+| `SP_PROXY_REGION_BIND_ADDR` | `127.0.0.1` | Bind address for the region (data-plane) listeners. Default loopback-only matches the dashboard's pattern -- the proxy reads `X-SP-Proxy-Merchant-Id` without authentication, so any reachable client can self-claim any merchant identity. Use `0.0.0.0` only in a container with a host-side `127.0.0.1:port` mapping, or when direct external access is the operator's deliberate choice. |
 
 ### Rate Limiting
 

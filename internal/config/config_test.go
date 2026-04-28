@@ -422,6 +422,7 @@ func productionConfigBase(t *testing.T) *Config {
 	t.Setenv("SP_PROXY_PURGE_METADATA_RETENTION", "720h")
 	t.Setenv("SP_PROXY_PURGE_AUDIT_RETENTION", "9504h")
 	t.Setenv("SP_PROXY_DASHBOARD_BIND_ADDR", "127.0.0.1")
+	t.Setenv("SP_PROXY_REGION_BIND_ADDR", "127.0.0.1")
 	t.Setenv("SP_PROXY_BODIES_BACKEND", "local")
 	return Load()
 }
