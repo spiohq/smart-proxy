@@ -133,14 +133,14 @@ var DefaultBucketParams = map[string]BucketParams{
 
 	// ── Shipping API v2 ────────────────────────────────────────────────
 	// All operations: Rate 5, Burst 15 (default quota).
-	"/shipping/v2/shipments":                             {Rate: 5.0, Burst: 15},
-	"/shipping/v2/tracking":                              {Rate: 5.0, Burst: 15},
-	"/shipping/v2/rates":                                 {Rate: 5.0, Burst: 15},
-	"/shipping/v2/shipments/{shipmentId}/cancel":         {Rate: 5.0, Burst: 15},
-	"/shipping/v2/shipments/{shipmentId}/documents":      {Rate: 5.0, Burst: 15},
-	"/shipping/v2/oneClickShipment":                      {Rate: 5.0, Burst: 15},
-	"/shipping/v2/shipments/{shipmentId}/directPurchase": {Rate: 5.0, Burst: 15},
-	"/shipping/v2/collectionForms":                       {Rate: 5.0, Burst: 15},
+	"/shipping/v2/shipments":                        {Rate: 5.0, Burst: 15},
+	"/shipping/v2/tracking":                         {Rate: 5.0, Burst: 15},
+	"/shipping/v2/shipments/rates":                  {Rate: 5.0, Burst: 15},
+	"/shipping/v2/shipments/{shipmentId}/cancel":    {Rate: 5.0, Burst: 15},
+	"/shipping/v2/shipments/{shipmentId}/documents": {Rate: 5.0, Burst: 15},
+	"/shipping/v2/oneClickShipment":                 {Rate: 5.0, Burst: 15},
+	"/shipping/v2/shipments/directPurchase":         {Rate: 5.0, Burst: 15},
+	"/shipping/v2/collectionForms":                  {Rate: 5.0, Burst: 15},
 
 	// ── Merchant Fulfillment API v0 ────────────────────────────────────
 	"/mfn/v0/eligibleShippingServices": {Rate: 6.0, Burst: 12},

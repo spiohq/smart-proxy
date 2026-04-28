@@ -426,9 +426,24 @@ func TestClassify(t *testing.T) {
 			expected: "/shipping/v2/shipments/{shipmentId}/documents",
 		},
 		{
-			name:     "shipping v2 shipment direct purchase",
-			input:    "/shipping/v2/shipments/SHIP-v2-00001/directPurchase",
-			expected: "/shipping/v2/shipments/{shipmentId}/directPurchase",
+			// Top-level v2 operations -- distinct paths, NOT suffixed under
+			// {shipmentId}. Verified against amzn/.../shippingV2.json:
+			// purchaseShipment is POST /shipping/v2/shipments (4 seg),
+			// directPurchaseShipment is POST /shipping/v2/shipments/directPurchase (5 seg),
+			// getRates is POST /shipping/v2/shipments/rates (5 seg).
+			name:     "shipping v2 directPurchase top-level",
+			input:    "/shipping/v2/shipments/directPurchase",
+			expected: "/shipping/v2/shipments/directPurchase",
+		},
+		{
+			name:     "shipping v2 getRates top-level",
+			input:    "/shipping/v2/shipments/rates",
+			expected: "/shipping/v2/shipments/rates",
+		},
+		{
+			name:     "shipping v2 oneClickShipment top-level",
+			input:    "/shipping/v2/oneClickShipment",
+			expected: "/shipping/v2/oneClickShipment",
 		},
 
 		// ── Merchant Fulfillment v0 ────────────────────────────────────
@@ -676,6 +691,24 @@ func TestClassifyKnown(t *testing.T) {
 			name:        "easyShip bulk POST -- known",
 			input:       "/easyShip/2022-03-23/packages/bulk",
 			wantPattern: "/easyShip/2022-03-23/packages/bulk",
+			wantKnown:   true,
+		},
+		{
+			name:        "shipping v2 directPurchase top-level -- known",
+			input:       "/shipping/v2/shipments/directPurchase",
+			wantPattern: "/shipping/v2/shipments/directPurchase",
+			wantKnown:   true,
+		},
+		{
+			name:        "shipping v2 getRates top-level -- known",
+			input:       "/shipping/v2/shipments/rates",
+			wantPattern: "/shipping/v2/shipments/rates",
+			wantKnown:   true,
+		},
+		{
+			name:        "shipping v2 oneClickShipment top-level -- known",
+			input:       "/shipping/v2/oneClickShipment",
+			wantPattern: "/shipping/v2/oneClickShipment",
 			wantKnown:   true,
 		},
 		{

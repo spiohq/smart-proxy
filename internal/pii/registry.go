@@ -232,21 +232,27 @@ var DefaultRequestBodyPIIRules = map[string][]FieldRedaction{
 		{JSONPath: "$.message.text", Mode: RedactModeRedact},
 	},
 
-	// MFN createShipment: ShipToAddress is buyer-PII; ShipFromAddress is
-	// seller's own warehouse and is NOT redacted.
+	// MFN createShipment. Schema verified against
+	// amzn/selling-partner-api-models/.../merchantFulfillmentV0.json:
+	// the request body has ONLY ShipFromAddress (no ShipToAddress field
+	// exists at the request body level), and in the MFN return-shipment
+	// use case ShipFromAddress carries the buyer's address.
 	"/mfn/v0/shipments": {
-		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.Name", Mode: RedactModeRedact},
-		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.AddressLine1", Mode: RedactModeRedact},
-		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.AddressLine2", Mode: RedactModeRedact},
-		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.AddressLine3", Mode: RedactModeRedact},
-		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.City", Mode: RedactModeRedact},
-		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.StateOrProvinceCode", Mode: RedactModeRedact},
-		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.PostalCode", Mode: RedactModeRedact},
-		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.Phone", Mode: RedactModeRedact},
-		{JSONPath: "$.ShipmentRequestDetails.ShipToAddress.Email", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipFromAddress.Name", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipFromAddress.AddressLine1", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipFromAddress.AddressLine2", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipFromAddress.AddressLine3", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipFromAddress.DistrictOrCounty", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipFromAddress.City", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipFromAddress.StateOrProvinceCode", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipFromAddress.PostalCode", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipFromAddress.Phone", Mode: RedactModeRedact},
+		{JSONPath: "$.ShipmentRequestDetails.ShipFromAddress.Email", Mode: RedactModeRedact},
 	},
 
-	// Shipping v1 / v2 purchaseShipment: shipTo is buyer-PII.
+	// Shipping v1 purchaseShipment / createShipment. Schema verified
+	// against shipping.json: top-level shipTo AND shipFrom both carry
+	// PII; copyEmails is an array of additional notification addresses.
 	"/shipping/v1/shipments": {
 		{JSONPath: "$.shipTo.name", Mode: RedactModeRedact},
 		{JSONPath: "$.shipTo.addressLine1", Mode: RedactModeRedact},
@@ -257,23 +263,70 @@ var DefaultRequestBodyPIIRules = map[string][]FieldRedaction{
 		{JSONPath: "$.shipTo.postalCode", Mode: RedactModeRedact},
 		{JSONPath: "$.shipTo.phoneNumber", Mode: RedactModeRedact},
 		{JSONPath: "$.shipTo.email", Mode: RedactModeRedact},
-	},
-	"/shipping/v2/shipments": {
-		{JSONPath: "$.shipTo.name", Mode: RedactModeRedact},
-		{JSONPath: "$.shipTo.addressLine1", Mode: RedactModeRedact},
-		{JSONPath: "$.shipTo.addressLine2", Mode: RedactModeRedact},
-		{JSONPath: "$.shipTo.addressLine3", Mode: RedactModeRedact},
-		{JSONPath: "$.shipTo.city", Mode: RedactModeRedact},
-		{JSONPath: "$.shipTo.stateOrRegion", Mode: RedactModeRedact},
-		{JSONPath: "$.shipTo.postalCode", Mode: RedactModeRedact},
-		{JSONPath: "$.shipTo.phoneNumber", Mode: RedactModeRedact},
-		{JSONPath: "$.shipTo.email", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.copyEmails[*]", Mode: RedactModeRedact},
+		{JSONPath: "$.shipFrom.name", Mode: RedactModeRedact},
+		{JSONPath: "$.shipFrom.addressLine1", Mode: RedactModeRedact},
+		{JSONPath: "$.shipFrom.addressLine2", Mode: RedactModeRedact},
+		{JSONPath: "$.shipFrom.addressLine3", Mode: RedactModeRedact},
+		{JSONPath: "$.shipFrom.city", Mode: RedactModeRedact},
+		{JSONPath: "$.shipFrom.stateOrRegion", Mode: RedactModeRedact},
+		{JSONPath: "$.shipFrom.postalCode", Mode: RedactModeRedact},
+		{JSONPath: "$.shipFrom.phoneNumber", Mode: RedactModeRedact},
+		{JSONPath: "$.shipFrom.email", Mode: RedactModeRedact},
+		{JSONPath: "$.shipFrom.copyEmails[*]", Mode: RedactModeRedact},
 	},
 
-	// EasyShip bulk: full-body redaction (per-buyer pickup details).
-	"/easyShip/2022-03-23/packages/bulk": {
-		{JSONPath: "$", Mode: RedactModeRedact},
-	},
+	// Shipping v2: there is NO top-level POST at /shipping/v2/shipments.
+	// Address-bearing v2 operations are at three sub-paths. Schema
+	// verified against shippingV2.json: each request has shipTo +
+	// shipFrom + returnTo at the top level, plus a per-package
+	// sellerDisplayName that frequently contains a personal seller name.
+	"/shipping/v2/shipments/rates":          shippingV2AddressRules,
+	"/shipping/v2/shipments/directPurchase": shippingV2AddressRules,
+	"/shipping/v2/oneClickShipment":         shippingV2AddressRules,
+
+	// /easyShip/2022-03-23/packages/bulk is intentionally NOT listed.
+	// Schema verified against easyShip_2022-03-23.json: the request body
+	// is {marketplaceId, orderScheduleDetailsList[*].{amazonOrderId,
+	// packageDetails}, labelFormat}. The buyer is referenced by
+	// amazonOrderId only, and Order IDs are not direct PII per Amazon's
+	// DPP definition. No request-body redaction needed.
+}
+
+// shippingV2AddressRules is shared across the three v2 endpoints with
+// identical address-bearing schemas.
+var shippingV2AddressRules = []FieldRedaction{
+	{JSONPath: "$.shipTo.name", Mode: RedactModeRedact},
+	{JSONPath: "$.shipTo.companyName", Mode: RedactModeRedact},
+	{JSONPath: "$.shipTo.addressLine1", Mode: RedactModeRedact},
+	{JSONPath: "$.shipTo.addressLine2", Mode: RedactModeRedact},
+	{JSONPath: "$.shipTo.addressLine3", Mode: RedactModeRedact},
+	{JSONPath: "$.shipTo.city", Mode: RedactModeRedact},
+	{JSONPath: "$.shipTo.stateOrRegion", Mode: RedactModeRedact},
+	{JSONPath: "$.shipTo.postalCode", Mode: RedactModeRedact},
+	{JSONPath: "$.shipTo.phoneNumber", Mode: RedactModeRedact},
+	{JSONPath: "$.shipTo.email", Mode: RedactModeRedact},
+	{JSONPath: "$.shipFrom.name", Mode: RedactModeRedact},
+	{JSONPath: "$.shipFrom.companyName", Mode: RedactModeRedact},
+	{JSONPath: "$.shipFrom.addressLine1", Mode: RedactModeRedact},
+	{JSONPath: "$.shipFrom.addressLine2", Mode: RedactModeRedact},
+	{JSONPath: "$.shipFrom.addressLine3", Mode: RedactModeRedact},
+	{JSONPath: "$.shipFrom.city", Mode: RedactModeRedact},
+	{JSONPath: "$.shipFrom.stateOrRegion", Mode: RedactModeRedact},
+	{JSONPath: "$.shipFrom.postalCode", Mode: RedactModeRedact},
+	{JSONPath: "$.shipFrom.phoneNumber", Mode: RedactModeRedact},
+	{JSONPath: "$.shipFrom.email", Mode: RedactModeRedact},
+	{JSONPath: "$.returnTo.name", Mode: RedactModeRedact},
+	{JSONPath: "$.returnTo.companyName", Mode: RedactModeRedact},
+	{JSONPath: "$.returnTo.addressLine1", Mode: RedactModeRedact},
+	{JSONPath: "$.returnTo.addressLine2", Mode: RedactModeRedact},
+	{JSONPath: "$.returnTo.addressLine3", Mode: RedactModeRedact},
+	{JSONPath: "$.returnTo.city", Mode: RedactModeRedact},
+	{JSONPath: "$.returnTo.stateOrRegion", Mode: RedactModeRedact},
+	{JSONPath: "$.returnTo.postalCode", Mode: RedactModeRedact},
+	{JSONPath: "$.returnTo.phoneNumber", Mode: RedactModeRedact},
+	{JSONPath: "$.returnTo.email", Mode: RedactModeRedact},
+	{JSONPath: "$.packages[*].sellerDisplayName", Mode: RedactModeRedact},
 }
 
 // DefaultFullBodyPIIEndpoints lists endpoint patterns whose entire response body

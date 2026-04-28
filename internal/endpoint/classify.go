@@ -111,9 +111,13 @@ var endpointPatterns = []struct {
 	// 6 segments (disambiguated by suffix)
 	{"/shipping/v2/shipments/", 6, "cancel", "/shipping/v2/shipments/{shipmentId}/cancel"},
 	{"/shipping/v2/shipments/", 6, "documents", "/shipping/v2/shipments/{shipmentId}/documents"},
-	{"/shipping/v2/shipments/", 6, "directPurchase", "/shipping/v2/shipments/{shipmentId}/directPurchase"},
-	// 4 segments (list/POST endpoint -- more specific patterns above)
+	// 5 segments (top-level operations on the shipments collection)
+	{"/shipping/v2/shipments/rates", 5, "", "/shipping/v2/shipments/rates"},
+	{"/shipping/v2/shipments/directPurchase", 5, "", "/shipping/v2/shipments/directPurchase"},
+	// 4 segments (purchaseShipment list/POST endpoint -- more specific patterns above)
 	{"/shipping/v2/shipments", 4, "", "/shipping/v2/shipments"},
+	// Other top-level v2 operations (separate paths, not under /shipments)
+	{"/shipping/v2/oneClickShipment", 4, "", "/shipping/v2/oneClickShipment"},
 
 	// ── Merchant Fulfillment v0 ────────────────────────────────────────
 	// 4 segments (list/POST endpoint -- before the 5-segment {shipmentId})

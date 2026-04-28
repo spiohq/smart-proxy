@@ -535,23 +535,29 @@ func TestRequestBodyContainsPII_KnownEndpoints(t *testing.T) {
 		method, path string
 		want         bool
 	}{
-		// Schema-PII POST endpoints
+		// Schema-PII POST endpoints (verified against amzn/.../*.json schemas).
 		{"POST", "/messaging/v1/orders/903-3489051-5871062/messages/createConfirmServiceDetails", true},
 		{"POST", "/messaging/v1/orders/903-3489051-5871062/messages/createUnexpectedProblem", true},
 		{"POST", "/mfn/v0/shipments", true},
 		{"POST", "/shipping/v1/shipments", true},
-		{"POST", "/shipping/v2/shipments", true},
-		{"POST", "/easyShip/2022-03-23/packages/bulk", true},
+		{"POST", "/shipping/v2/shipments/rates", true},
+		{"POST", "/shipping/v2/shipments/directPurchase", true},
+		{"POST", "/shipping/v2/oneClickShipment", true},
 
-		// Off-schema endpoints stay false
+		// Off-schema endpoints stay false (caller-side garbage is caller responsibility).
 		{"POST", "/feeds/2021-06-30/feeds", false},
 		{"POST", "/catalog/2022-04-01/items", false},
+		// purchaseShipment v2 takes only rateId; no shipTo in the body.
+		{"POST", "/shipping/v2/shipments", false},
+		// EasyShip bulk references buyers by amazonOrderId only; no direct PII in body.
+		{"POST", "/easyShip/2022-03-23/packages/bulk", false},
 
-		// GETs always false
+		// GETs always false.
 		{"GET", "/orders/v0/orders", false},
 		{"GET", "/messaging/v1/orders/903-3489051-5871062/messages/some-message-id", false},
 
-		// Unknown messaging action is treated as the GET-pattern (no rules), so false
+		// Unknown messaging action -- the shim's whitelist correctly rejects it,
+		// and the path then collapses onto the 7-segment GET pattern (no rules).
 		{"POST", "/messaging/v1/orders/903-3489051-5871062/messages/notARealAction", false},
 	}
 
@@ -570,6 +576,21 @@ func TestRequestBodyContainsPII_FailClosed_UnknownPostIsTrue(t *testing.T) {
 		"fail-closed: unknown POST paths must be treated as request-body PII")
 }
 
+func TestRequestBodyPattern_FailClosed_UnknownPostReturnsRawPath(t *testing.T) {
+	// Symmetric to the predicate test above. RequestBodyPattern must agree
+	// with RequestBodyContainsPII on the fail-closed branch: when the
+	// predicate says yes, the pattern must be non-empty so the engine has
+	// something to feed into RedactFullBody. The contract is "raw path,
+	// engine treats as full-body PII" -- exercise both halves here.
+	reg := NewRegistryFailClosed()
+	r := &http.Request{Method: "POST", URL: mustParseURL("/futureapi/2030-01-01/unknown")}
+	pat := reg.RequestBodyPattern(r)
+	assert.Equal(t, "/futureapi/2030-01-01/unknown", pat,
+		"fail-closed: RequestBodyPattern returns the raw path for unknown POSTs")
+	assert.True(t, reg.RequestBodyContainsPII(r),
+		"sanity: predicate and pattern accessor agree on fail-closed unknown")
+}
+
 func TestRequestBodyRulesFor_MessagingFullBody(t *testing.T) {
 	reg := NewRegistry()
 	rules := reg.RequestBodyRulesFor("/messaging/v1/orders/{orderId}/messages/createConfirmServiceDetails")
@@ -577,7 +598,12 @@ func TestRequestBodyRulesFor_MessagingFullBody(t *testing.T) {
 	assert.Equal(t, "$.message.text", rules[0].JSONPath)
 }
 
-func TestRequestBodyRulesFor_MfnShipToAddress(t *testing.T) {
+func TestRequestBodyRulesFor_MfnShipFromAddress(t *testing.T) {
+	// MFN createShipment: schema verified against
+	// amzn/.../merchantFulfillmentV0.json -- the request body has ONLY
+	// ShipFromAddress (no ShipToAddress field exists at the request body
+	// level), and in the MFN return-shipment use case ShipFromAddress
+	// carries the buyer's address.
 	reg := NewRegistry()
 	rules := reg.RequestBodyRulesFor("/mfn/v0/shipments")
 	require.NotEmpty(t, rules)
@@ -586,12 +612,70 @@ func TestRequestBodyRulesFor_MfnShipToAddress(t *testing.T) {
 	for _, r := range rules {
 		paths = append(paths, r.JSONPath)
 	}
-	assert.Contains(t, paths, "$.ShipmentRequestDetails.ShipToAddress.Name")
-	assert.Contains(t, paths, "$.ShipmentRequestDetails.ShipToAddress.Email")
-	assert.Contains(t, paths, "$.ShipmentRequestDetails.ShipToAddress.AddressLine1")
-	assert.Contains(t, paths, "$.ShipmentRequestDetails.ShipToAddress.Phone")
-	assert.NotContains(t, paths, "$.ShipmentRequestDetails.ShipFromAddress.Name",
-		"ShipFromAddress is the seller's warehouse, not buyer PII; must not be redacted")
+	assert.Contains(t, paths, "$.ShipmentRequestDetails.ShipFromAddress.Name")
+	assert.Contains(t, paths, "$.ShipmentRequestDetails.ShipFromAddress.Email")
+	assert.Contains(t, paths, "$.ShipmentRequestDetails.ShipFromAddress.AddressLine1")
+	assert.Contains(t, paths, "$.ShipmentRequestDetails.ShipFromAddress.Phone")
+	assert.Contains(t, paths, "$.ShipmentRequestDetails.ShipFromAddress.DistrictOrCounty")
+	assert.NotContains(t, paths, "$.ShipmentRequestDetails.ShipToAddress.Name",
+		"MFN's request body has no ShipToAddress field -- this is a schema misreading and must not appear")
+}
+
+func TestRequestBodyRulesFor_ShippingV1_BothDirections(t *testing.T) {
+	// Shipping v1 request body has top-level shipTo AND shipFrom plus
+	// per-direction copyEmails arrays.
+	reg := NewRegistry()
+	rules := reg.RequestBodyRulesFor("/shipping/v1/shipments")
+	require.NotEmpty(t, rules)
+
+	var paths []string
+	for _, r := range rules {
+		paths = append(paths, r.JSONPath)
+	}
+	assert.Contains(t, paths, "$.shipTo.name")
+	assert.Contains(t, paths, "$.shipTo.copyEmails[*]")
+	assert.Contains(t, paths, "$.shipFrom.name")
+	assert.Contains(t, paths, "$.shipFrom.copyEmails[*]")
+}
+
+func TestRequestBodyRulesFor_ShippingV2_ThreeEndpointsShareRules(t *testing.T) {
+	// All three v2 address-bearing endpoints share the same rule set.
+	reg := NewRegistry()
+	for _, pattern := range []string{
+		"/shipping/v2/shipments/rates",
+		"/shipping/v2/shipments/directPurchase",
+		"/shipping/v2/oneClickShipment",
+	} {
+		t.Run(pattern, func(t *testing.T) {
+			rules := reg.RequestBodyRulesFor(pattern)
+			require.NotEmpty(t, rules)
+			var paths []string
+			for _, r := range rules {
+				paths = append(paths, r.JSONPath)
+			}
+			// Three addresses + per-package seller display name.
+			assert.Contains(t, paths, "$.shipTo.name")
+			assert.Contains(t, paths, "$.shipFrom.name")
+			assert.Contains(t, paths, "$.returnTo.name")
+			assert.Contains(t, paths, "$.packages[*].sellerDisplayName")
+		})
+	}
+}
+
+func TestRequestBodyRulesFor_EasyShipBulk_NoRules(t *testing.T) {
+	// EasyShip bulk references buyers by amazonOrderId only; per Amazon's
+	// DPP definition Order IDs are not direct PII, so no request-body
+	// redaction rules are registered.
+	reg := NewRegistry()
+	assert.Empty(t, reg.RequestBodyRulesFor("/easyShip/2022-03-23/packages/bulk"))
+}
+
+func TestRequestBodyRulesFor_ShippingV2PurchaseShipment_NoRules(t *testing.T) {
+	// purchaseShipment (POST /shipping/v2/shipments) takes only rateId +
+	// requestedDocumentSpecification + requestToken; the address was
+	// already supplied at getRates time. No request-body redaction needed.
+	reg := NewRegistry()
+	assert.Empty(t, reg.RequestBodyRulesFor("/shipping/v2/shipments"))
 }
 
 func TestRequestBodyPattern_RoundTrips(t *testing.T) {
@@ -603,7 +687,9 @@ func TestRequestBodyPattern_RoundTrips(t *testing.T) {
 		{"POST", "/messaging/v1/orders/903-3489051-5871062/messages/createConfirmServiceDetails"},
 		{"POST", "/mfn/v0/shipments"},
 		{"POST", "/shipping/v1/shipments"},
-		{"POST", "/easyShip/2022-03-23/packages/bulk"},
+		{"POST", "/shipping/v2/shipments/rates"},
+		{"POST", "/shipping/v2/shipments/directPurchase"},
+		{"POST", "/shipping/v2/oneClickShipment"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {
