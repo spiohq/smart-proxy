@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -139,4 +142,17 @@ func TestLocal_KeyValidation(t *testing.T) {
 
 	err = b.Put(ctx, "", bytes.NewReader([]byte("x")), 1)
 	assert.Error(t, err)
+}
+
+func TestLocalBackend_PutWritesAt0o600(t *testing.T) {
+	root := t.TempDir()
+	b, err := NewLocal(root)
+	require.NoError(t, err)
+
+	err = b.Put(context.Background(), "test/key", strings.NewReader("hello"), 5)
+	require.NoError(t, err)
+
+	info, err := os.Stat(filepath.Join(root, "test", "key"))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }

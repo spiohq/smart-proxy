@@ -20,7 +20,7 @@ type LocalBackend struct {
 // NewLocal creates a local filesystem backend rooted at root. The directory
 // is created if missing.
 func NewLocal(root string) (*LocalBackend, error) {
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, fmt.Errorf("create blob root %s: %w", root, err)
 	}
 	return &LocalBackend{root: root}, nil
@@ -38,7 +38,7 @@ func (b *LocalBackend) Put(ctx context.Context, key string, r io.Reader, _ int64
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("mkdir for %s: %w", key, err)
 	}
 	// Atomic write: stage to tmp then rename.
@@ -46,6 +46,7 @@ func (b *LocalBackend) Put(ctx context.Context, key string, r io.Reader, _ int64
 	if err != nil {
 		return fmt.Errorf("create tmp: %w", err)
 	}
+	_ = tmp.Chmod(0o600)
 	tmpName := tmp.Name()
 	if _, err := io.Copy(tmp, r); err != nil {
 		tmp.Close()

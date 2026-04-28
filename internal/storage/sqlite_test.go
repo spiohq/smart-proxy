@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -411,6 +413,25 @@ func TestSQLiteStore_NullifyBodyRefs_EmptyNoOp(t *testing.T) {
 	n, err := store.NullifyBodyRefs(ctx, nil)
 	require.NoError(t, err)
 	assert.Equal(t, int64(0), n)
+}
+
+func TestNewSQLiteStore_FileModeIs0o600(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	store, err := NewSQLiteStore(dbPath)
+	require.NoError(t, err)
+	defer store.Close()
+
+	// All three SQLite-managed files must be 0o600. The main DB file is
+	// chmodded by NewSQLiteStore directly; the WAL and SHM files are
+	// created by SQLite with the process umask and have to be chmodded
+	// separately by NewSQLiteStore after the first PRAGMA journal_mode=WAL.
+	for _, name := range []string{"test.db", "test.db-wal", "test.db-shm"} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		require.NoError(t, err, "%s must exist after NewSQLiteStore", name)
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(),
+			"%s must be 0o600 to keep WAL/SHM PII out of other users' reach", name)
+	}
 }
 
 func TestSQLiteStore_Maintain(t *testing.T) {
