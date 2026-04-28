@@ -83,9 +83,13 @@ Smart Proxy maintains a **registry of PII-containing endpoints** at [internal/pi
 
 The original (unredacted) response is always forwarded to your application unchanged. Redaction applies only to logs and cache.
 
+*Code: rules + full-body endpoint list in [internal/pii/registry.go](../internal/pii/registry.go); modes + non-mutating `RedactForLogging` in [internal/pii/engine.go](../internal/pii/engine.go); JSONPath-style field selection in [internal/pii/jsonpath.go](../internal/pii/jsonpath.go).*
+
 ### 3.2 Cache exclusion
 
 When `SP_PROXY_CACHE_EXCLUDE_PII=true` (default), responses containing PII are not stored in the cache. The response header `X-SP-Proxy-Cache: PII_EXCLUDED` indicates the exclusion.
+
+*Code: [internal/cache/middleware.go](../internal/cache/middleware.go), default in [internal/config/config.go](../internal/config/config.go) (`SP_PROXY_CACHE_EXCLUDE_PII`).*
 
 ### 3.3 Retention enforcement
 
@@ -94,6 +98,8 @@ When `SP_PROXY_CACHE_EXCLUDE_PII=true` (default), responses containing PII are n
 | Body files (PII) | 30 days (`BODIES_ARCHIVE_MAX_AGE=720h`) | §2.1 |
 | Metadata (request logs, no PII) | 30 days (`PURGE_METADATA_RETENTION=720h`) | §1.7 (limit 18 months) |
 | Audit log | ~13 months (`PURGE_AUDIT_RETENTION=9504h`) | §2.6 (minimum 12 months) |
+
+*Code: defaults in [internal/config/config.go](../internal/config/config.go); body rotation in [internal/bodies/rotator.go](../internal/bodies/rotator.go); metadata + audit purge in [internal/purge/purge.go](../internal/purge/purge.go).*
 
 ### 3.4 Header redaction
 
@@ -105,11 +111,15 @@ These headers are always redacted in logs:
 | `x-amz-access-token` | SP-API access token |
 | `x-amz-security-token` | AWS STS session token |
 
+*Code: [internal/pii/headers.go](../internal/pii/headers.go), invoked from [internal/logging/](../internal/logging/) before metadata is persisted.*
+
 ### 3.5 Document-URL redaction
 
 Pre-signed S3 URLs returned by `/reports/2021-06-30/documents/{documentId}`, `/feeds/2021-06-30/documents/{feedDocumentId}`, and `/datakiosk/2023-11-15/documents/{documentId}` are credential-equivalent: anyone with the URL within its ~5-minute validity window can fetch the underlying file (which often contains PII). Smart Proxy redacts the `url` field (and `encryptionDetails.key` where present) in logs.
 
 The original URL is forwarded to the client; only the persisted log copy is redacted. Operators who need to re-download a document after-the-fact re-issue the original API call to mint a fresh URL.
+
+*Code: rules in [internal/pii/registry.go](../internal/pii/registry.go) (`reports`, `feeds`, `datakiosk` document entries); applied via [internal/pii/engine.go](../internal/pii/engine.go) `RedactForLogging` (returns a redacted copy, never mutates the original bytes); request flow in [internal/proxy/](../internal/proxy/) writes the original response to the client before [internal/logging/](../internal/logging/) hands the captured copy to the engine.*
 
 ### 3.6 Query-string redaction
 
@@ -117,11 +127,15 @@ Query parameters whose values are PII are redacted in `request_logs.query_params
 
 The original query string is forwarded to Amazon unchanged.
 
+*Code: [internal/pii/query.go](../internal/pii/query.go); operator extras wired through [internal/pii/registry.go](../internal/pii/registry.go); applied in [internal/logging/](../internal/logging/) on the persisted copy only.*
+
 ### 3.7 Fail-closed mode (default)
 
 `SP_PROXY_PII_FAIL_CLOSED=true` (default) makes Smart Proxy treat any path that does not match a registered SP-API endpoint as full-body PII. This guarantees that a new SP-API endpoint added by Amazon cannot silently bypass redaction until the registry is updated.
 
 Trade-off: dashboard log-detail views show `{"redacted": true, ...}` for any endpoint not yet in the registry. Update [internal/pii/registry.go](../internal/pii/registry.go) when Amazon adds endpoints you actually use.
+
+*Code: default + flag wiring in [internal/config/config.go](../internal/config/config.go); fail-closed lookup logic in [internal/pii/registry.go](../internal/pii/registry.go).*
 
 ## 4. What the operator must do (Smart-Proxy-specific)
 
@@ -152,6 +166,30 @@ The dashboard (port 9090) ships without authentication and binds to `127.0.0.1` 
 
 Container deployments use both: the container binds to `0.0.0.0` internally (so Docker port-forward works), and the host-side mapping `127.0.0.1:9090:9090` enforces the loopback restriction. The startup warning still fires inside the container; treat that as the audit acknowledgment.
 
+#### Production-mode warnings (`dpp_compliance_warning`)
+
+The non-loopback dashboard warning is one entry in a broader set. Smart Proxy evaluates the full configuration on startup and emits a `dpp_compliance_warning` audit event for each finding. In `SP_PROXY_ENV=production` the following warnings fire:
+
+| Trigger | DPP § |
+|---|---|
+| `SP_PROXY_PII_FAIL_CLOSED=false` | §2.6 (logging without PII) |
+| `SP_PROXY_CACHE_EXCLUDE_PII=false` | §2.1 (PII retention) |
+| `SP_PROXY_BODIES_ARCHIVE_MAX_AGE > 30d` | §2.1 |
+| `SP_PROXY_PURGE_METADATA_RETENTION > 18 months` | §1.7 |
+| `SP_PROXY_PURGE_AUDIT_RETENTION < 12 months` | §2.6 |
+| `SP_PROXY_DASHBOARD_BIND_ADDR` is non-loopback | §1.2 (access management) |
+
+Two further warnings fire in **all** environments (not gated on production) when the S3 backend is enabled:
+
+| Trigger | DPP § |
+|---|---|
+| `SP_PROXY_S3_ENDPOINT` uses plain `http://` | §1.5 (TLS in transit) |
+| `SP_PROXY_S3_SSE` is empty (relying on bucket default) | §2.4 (encryption at rest) |
+
+A clean production boot prints zero `dpp_compliance_warning` entries. Auditors should grep for the event type as part of pre-audit verification (see §6).
+
+*Code: default bind address + warning logic in [internal/config/config.go](../internal/config/config.go) `Warnings()`; listener construction in [internal/server/server.go](../internal/server/server.go); audit-event emission in [cmd/smart-proxy/main.go](../cmd/smart-proxy/main.go) using `audit.EventDPPComplianceWarning` from [internal/audit/events.go](../internal/audit/events.go); test coverage in `TestProductionWarnings_*` family in [internal/config/config_test.go](../internal/config/config_test.go).*
+
 ### 4.3 S3 server-side encryption
 
 When `SP_PROXY_BODIES_BACKEND=s3`, set `SP_PROXY_S3_SSE` to enforce SSE on every PutObject:
@@ -175,6 +213,8 @@ Pair with a bucket policy that denies unencrypted uploads:
 ```
 
 Smart Proxy refuses to start in production mode if `SP_PROXY_S3_ENDPOINT` is plain `http://`.
+
+*Code: SSE wiring + `PutObject` enforcement in [internal/blob/s3.go](../internal/blob/s3.go); SSE value validation and plain-`http://` production refusal in [internal/config/config.go](../internal/config/config.go) `Validate()`.*
 
 ### 4.4 §1.7 deletion procedure
 
@@ -318,18 +358,26 @@ Smart Proxy interacts with AUP at these specific points:
 
 ## 8. Verification table
 
-Each Smart-Proxy enforcement claim above is backed by a test. Reviewers can run these tests to verify the claim independently.
+Each Smart-Proxy enforcement claim above is backed by code and (in almost all cases) a test. Reviewers can run these tests to verify the claim independently.
 
-| Smart Proxy enforcement | Verified by |
-|---|---|
-| PII header redaction (§3.4) | [internal/pii/headers_test.go](../internal/pii/headers_test.go) |
-| Field-rule redaction (§3.1) | [internal/pii/registry_test.go](../internal/pii/registry_test.go) |
-| Document-URL redaction (§3.5) | `TestDocumentURL_RedactionRoundTrip` |
-| Query-string redaction (§3.6) | [internal/pii/query_test.go](../internal/pii/query_test.go) |
-| Cache exclusion on PII (§3.2) | [internal/cache/](../internal/cache/) |
-| FAIL_CLOSED default (§3.7) | `TestDefaults_FailClosedTrue` |
-| 30-day body retention default (§3.3) | existing config tests |
-| 13-month audit retention default (§3.3) | `TestDefaults_AuditRetention13Months` |
-| Production-mode warnings emit | `TestProductionWarnings_*` |
-| Dashboard loopback default | `TestDefaults_DashboardBindAddrLoopback`, `TestDashboardBindAddr_DefaultsToLoopback` |
-| End-to-end PII no-leak | [test/e2e/dpp_test.go](../test/e2e/dpp_test.go) |
+| Smart Proxy enforcement | Implementation | Verified by |
+|---|---|---|
+| PII header redaction (§3.4) | [internal/pii/headers.go](../internal/pii/headers.go) | [internal/pii/headers_test.go](../internal/pii/headers_test.go); end-to-end `TestE2E_PII_AuthHeaderRedacted` in [test/e2e/pii_test.go](../test/e2e/pii_test.go) |
+| Field-rule redaction (§3.1) | [internal/pii/registry.go](../internal/pii/registry.go), [internal/pii/engine.go](../internal/pii/engine.go), [internal/pii/jsonpath.go](../internal/pii/jsonpath.go) | [internal/pii/registry_test.go](../internal/pii/registry_test.go), [internal/pii/engine_test.go](../internal/pii/engine_test.go) |
+| Three redaction modes (REDACT/HASH/OMIT) (§3.1) | [internal/pii/engine.go](../internal/pii/engine.go) | `TestRedactForLogging_RedactMode`, `TestRedactForLogging_HashMode`, `TestRedactForLogging_OmitMode` in [internal/pii/engine_test.go](../internal/pii/engine_test.go) |
+| Original response unchanged for client (§3.1, §3.5) | [internal/pii/engine.go](../internal/pii/engine.go) (`RedactForLogging` returns a copy), [internal/proxy/](../internal/proxy/), [internal/logging/](../internal/logging/) | `TestRedactForLogging_OriginalUnmodified` in [internal/pii/engine_test.go](../internal/pii/engine_test.go); `TestE2E_DPP_NoLeakOfBuyerEmail` in [test/e2e/dpp_test.go](../test/e2e/dpp_test.go) |
+| Document-URL redaction (§3.5) | [internal/pii/registry.go](../internal/pii/registry.go) (reports/feeds/datakiosk rules) | `TestDocumentURLs_AreRedacted_Reports/Feeds/DataKiosk`, `TestDocumentURL_RedactionRoundTrip` in [internal/pii/registry_test.go](../internal/pii/registry_test.go) |
+| Query-string redaction (§3.6) | [internal/pii/query.go](../internal/pii/query.go) | [internal/pii/query_test.go](../internal/pii/query_test.go); end-to-end coverage in [test/e2e/dpp_test.go](../test/e2e/dpp_test.go) |
+| Cache exclusion on PII (§3.2) + `X-SP-Proxy-Cache: PII_EXCLUDED` header | [internal/cache/middleware.go](../internal/cache/middleware.go) | [internal/cache/middleware_test.go](../internal/cache/middleware_test.go), [test/e2e/cache_test.go](../test/e2e/cache_test.go) |
+| FAIL_CLOSED default `true` (§3.7) | [internal/config/config.go](../internal/config/config.go), [internal/pii/registry.go](../internal/pii/registry.go) | `TestLoad_PIIFailClosedDefault`, `TestDefaults_FailClosedTrue` in [internal/config/config_test.go](../internal/config/config_test.go); `TestE2E_FailClosed_UnknownEndpointExcludedFromCache` in [test/e2e/failclosed_test.go](../test/e2e/failclosed_test.go) |
+| 30-day body retention default (§3.3) | [internal/config/config.go](../internal/config/config.go), [internal/bodies/rotator.go](../internal/bodies/rotator.go) | `TestLoad_BodiesDefaults` in [internal/config/config_test.go](../internal/config/config_test.go) |
+| 30-day metadata retention default (§3.3) | [internal/config/config.go](../internal/config/config.go), [internal/purge/purge.go](../internal/purge/purge.go) | `TestDefaults_MetadataRetention30Days` in [internal/config/config_test.go](../internal/config/config_test.go) |
+| 13-month audit retention default (§3.3) | [internal/config/config.go](../internal/config/config.go), [internal/purge/purge.go](../internal/purge/purge.go) | `TestDefaults_AuditRetention13Months` in [internal/config/config_test.go](../internal/config/config_test.go) |
+| Production-mode `dpp_compliance_warning` audit events emit (§4.2) | [internal/config/config.go](../internal/config/config.go) `Warnings()`; [cmd/smart-proxy/main.go](../cmd/smart-proxy/main.go) emission; event constant in [internal/audit/events.go](../internal/audit/events.go) | `TestProductionWarnings_*` family in [internal/config/config_test.go](../internal/config/config_test.go) |
+| Dashboard loopback default (§4.2) | [internal/config/config.go](../internal/config/config.go), [internal/server/server.go](../internal/server/server.go) | `TestDefaults_DashboardBindAddrLoopback` in [internal/config/config_test.go](../internal/config/config_test.go); `TestDashboardBindAddr_DefaultsToLoopback` in [internal/server/server_test.go](../internal/server/server_test.go) |
+| S3 server-side encryption enforcement (§4.3) | [internal/blob/s3.go](../internal/blob/s3.go) (sets `ServerSideEncryption` on every PutObject); validation in [internal/config/config.go](../internal/config/config.go) | `TestS3Backend_PutWithSSEAES256/SSEKMS/SSEKMSDSSE` in [internal/blob/s3_test.go](../internal/blob/s3_test.go); `TestLoad_S3SSE*` in [internal/config/config_test.go](../internal/config/config_test.go) |
+| Plain-`http://` S3 endpoint refused in production (§4.3) | [internal/config/config.go](../internal/config/config.go) `Validate()` | `TestValidate_S3InsecureEndpointBlockedInProd`, `TestValidate_S3InsecureEndpointAllowedInDev` in [internal/config/config_test.go](../internal/config/config_test.go) |
+| HTTPS to Amazon (DPP §1.5) | [internal/proxy/director.go](../internal/proxy/director.go) (forces `req.URL.Scheme = "https"`); region hosts in [internal/server/region.go](../internal/server/region.go) | `TestDirector_SetsSchemeAndHost` in [internal/proxy/director_test.go](../internal/proxy/director_test.go) |
+| Merchant-scoped cache keys (AUP §4.4) | [internal/cache/keys.go](../internal/cache/keys.go), [internal/cache/middleware.go](../internal/cache/middleware.go) | [internal/cache/keys_test.go](../internal/cache/keys_test.go); end-to-end in [test/e2e/merchant_test.go](../test/e2e/merchant_test.go) |
+| Tokens (LWA + RDT) in process memory only (§4.1) | [internal/rdt/](../internal/rdt/) (in-memory `map`, no persistence); no token writers in [internal/storage/](../internal/storage/) or [internal/bodies/](../internal/bodies/) | structural: verified by absence of token persistence; redaction of bearer tokens covered by header-redaction tests above |
+| End-to-end PII no-leak | (cross-cutting) | [test/e2e/dpp_test.go](../test/e2e/dpp_test.go), [test/e2e/pii_test.go](../test/e2e/pii_test.go) |

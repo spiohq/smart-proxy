@@ -391,6 +391,13 @@ func TestDefaults_AuditRetention13Months(t *testing.T) {
 		"audit retention must default to 9504h (~13 months) per DPP §2.6 (>=12 months) with a buffer")
 }
 
+func TestDefaults_MetadataRetention30Days(t *testing.T) {
+	t.Setenv("SP_PROXY_PURGE_METADATA_RETENTION", "")
+	cfg := Load()
+	assert.Equal(t, "720h", cfg.Purge.MetadataRetention,
+		"metadata retention must default to 720h (30d) so request_logs stay well within the DPP §1.7 18-month ceiling")
+}
+
 func TestDefaults_DashboardBindAddrLoopback(t *testing.T) {
 	t.Setenv("SP_PROXY_DASHBOARD_BIND_ADDR", "")
 	cfg := Load()
