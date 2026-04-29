@@ -2,6 +2,7 @@ package logging
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -383,4 +384,110 @@ func TestLoggingMiddleware_QueryParamsRedacted_CustomExtras(t *testing.T) {
 	got := allMeta[0].QueryParams
 	assert.Contains(t, got, "customField=%5BREDACTED%5D")
 	assert.Contains(t, got, "asin=B0")
+}
+
+func TestLoggingMiddleware_PostMessagingRequestBodyRedacted(t *testing.T) {
+	logger, _, bs := setupTestLogger(t)
+	registry := pii.NewRegistry()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Drain body to mimic upstream consumption
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusOK)
+	})
+
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
+
+	body := `{"message":{"text":"Hi Maria, see you at Hauptstrasse 42, 10115 Berlin."}}`
+	req := httptest.NewRequest("POST",
+		"/messaging/v1/orders/903-3489051-5871062/messages/createConfirmServiceDetails",
+		strings.NewReader(body))
+	req.ContentLength = int64(len(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withMerchant(req, "merchant-a")
+
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+
+	logger.Close()
+
+	allBodies := bs.allEntries()
+	require.Len(t, allBodies, 1)
+	assert.NotContains(t, string(allBodies[0].RequestBody), "Maria",
+		"messaging request body must be redacted before persistence (F-02)")
+	assert.NotContains(t, string(allBodies[0].RequestBody), "Hauptstrasse")
+	assert.Contains(t, string(allBodies[0].RequestBody), "REDACTED")
+}
+
+func TestLoggingMiddleware_PostFeedsRequestBodyNotRedacted(t *testing.T) {
+	// Off-schema endpoint: even if the caller stuffs PII into a feed body,
+	// the proxy is not in the business of heuristic redaction; the body
+	// is persisted as-is. This is the explicit scope boundary in the spec.
+	logger, _, bs := setupTestLogger(t)
+	registry := pii.NewRegistry()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusOK)
+	})
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
+
+	body := `{"feedType":"POST_PRODUCT_DATA","marketplaceIds":["A1PA6795UKMFR9"]}`
+	req := httptest.NewRequest("POST", "/feeds/2021-06-30/feeds", strings.NewReader(body))
+	req.ContentLength = int64(len(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withMerchant(req, "merchant-a")
+
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+	logger.Close()
+
+	allBodies := bs.allEntries()
+	require.Len(t, allBodies, 1)
+	// Body present verbatim. (Garbage-in is caller responsibility.)
+	assert.Contains(t, string(allBodies[0].RequestBody), "POST_PRODUCT_DATA")
+}
+
+func TestLoggingMiddleware_PostMfnRequestBody_OnlyShipFromAddressRedacted(t *testing.T) {
+	// MFN createShipment: schema-verified that the ShipFromAddress field
+	// holds the buyer's address in the return-shipment use case. Buyer
+	// fields must be redacted; the AmazonOrderId stays untouched (Order IDs
+	// are not direct PII per Amazon's DPP definition).
+	logger, _, bs := setupTestLogger(t)
+	registry := pii.NewRegistry()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusOK)
+	})
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
+
+	body := `{
+		"ShipmentRequestDetails": {
+			"AmazonOrderId": "903-3489051-5871062",
+			"ShipFromAddress": {
+				"Name": "Real Buyer",
+				"AddressLine1": "300 Turnbull Ave",
+				"Email": "buyer@example.com",
+				"Phone": "7132341234"
+			}
+		}
+	}`
+	req := httptest.NewRequest("POST", "/mfn/v0/shipments", strings.NewReader(body))
+	req.ContentLength = int64(len(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withMerchant(req, "merchant-a")
+
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+	logger.Close()
+
+	allBodies := bs.allEntries()
+	require.Len(t, allBodies, 1)
+	rb := string(allBodies[0].RequestBody)
+	assert.NotContains(t, rb, "Real Buyer")
+	assert.NotContains(t, rb, "buyer@example.com")
+	assert.NotContains(t, rb, "7132341234")
+	assert.NotContains(t, rb, "300 Turnbull Ave")
+	assert.Contains(t, rb, "903-3489051-5871062", "Amazon Order IDs are not direct PII; must remain")
 }

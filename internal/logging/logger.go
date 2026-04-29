@@ -138,21 +138,26 @@ func (l *AsyncLogger) redactBody(entry *LogEntry) {
 
 	classifiedPath := endpoint.Classify(entry.Meta.Path)
 
-	// TODO(Task 9 / F-02): split this body by direction. As written, the
-	// IsFullBodyPII early return below covers only the response side --
-	// once Task 9 sets PIIRedactedRequest=true on POST traffic, the
-	// request body must be processed too, separately from the response
-	// branch. The plan's Task 9 Step 4 has the target shape.
-
-	// Full-body PII endpoint  -  replace entire body with placeholder
-	if l.piiEngine.Registry().IsFullBodyPII(classifiedPath) {
-		entry.Body.ResponseBody = json.RawMessage(l.piiEngine.RedactFullBody(classifiedPath))
-		return
+	// Response-side redaction (existing semantics, gated on the response flag).
+	if entry.Meta.PIIRedactedResponse {
+		if l.piiEngine.Registry().IsFullBodyPII(classifiedPath) {
+			entry.Body.ResponseBody = json.RawMessage(l.piiEngine.RedactFullBody(classifiedPath))
+		} else if entry.Body.ResponseBody != nil {
+			redacted, _ := l.piiEngine.RedactForLogging(classifiedPath, []byte(entry.Body.ResponseBody))
+			entry.Body.ResponseBody = json.RawMessage(redacted)
+		}
 	}
 
-	// Partial PII  -  redact specific fields
-	if entry.Body.ResponseBody != nil {
-		redacted, _ := l.piiEngine.RedactForLogging(classifiedPath, []byte(entry.Body.ResponseBody))
-		entry.Body.ResponseBody = json.RawMessage(redacted)
+	// Request-side redaction (F-02; gated on the request flag).
+	// Use entry.RequestBodyEndpoint (set by middleware) rather than classifiedPath:
+	// for POST messaging endpoints the method-blind classifier returns the GET
+	// variant, but the request-body rules are keyed on action-specific patterns.
+	if entry.Meta.PIIRedactedRequest && entry.Body.RequestBody != nil {
+		reqEndpoint := entry.RequestBodyEndpoint
+		if reqEndpoint == "" {
+			reqEndpoint = classifiedPath
+		}
+		redacted, _ := l.piiEngine.RedactRequestBodyForLogging(reqEndpoint, []byte(entry.Body.RequestBody))
+		entry.Body.RequestBody = json.RawMessage(redacted)
 	}
 }

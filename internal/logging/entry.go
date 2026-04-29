@@ -12,6 +12,13 @@ import (
 type LogEntry struct {
 	Meta *storage.RequestLog
 	Body *bodies.BodyEntry
+
+	// RequestBodyEndpoint is the canonical endpoint pattern used to look up
+	// request-body PII redaction rules. It differs from endpoint.Classify(Meta.Path)
+	// for POST messaging endpoints, which use action-specific patterns that the
+	// method-blind classifier collapses onto the GET variant.
+	// Set by LoggingMiddleware when PIIRedactedRequest is true.
+	RequestBodyEndpoint string
 }
 
 // GenerateRequestID produces a 32-character hex string (16 random bytes).
