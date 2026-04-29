@@ -271,14 +271,41 @@
 </div>
 
 <script lang="ts" module>
-  // JSON syntax coloring helper for inline rendering
+  // HTML-escape every character that could break out of a text context.
+  // Pentest finding F-14: colorizeJsonLine feeds the result into {@html ...}
+  // so any '<', '"', '&' in audit-event metadata would render as raw HTML
+  // without escaping. No remote path currently writes user-controlled
+  // content into auditLogger.Log, but the latent stored-XSS becomes real
+  // the moment one is added.
+  function escapeHtml(s: string): string {
+    const map: Record<string, string> = {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    };
+    return s.replace(/[&<>"']/g, (c) => map[c]);
+  }
+
+  // JSON syntax coloring helper for inline rendering. The input is escaped
+  // first so subsequent regex replacements operate on safe entity-encoded
+  // strings; the regexes match against &quot; (the escaped form) where the
+  // original used ".
   function colorizeJsonLine(line: string): string {
-    return line
-      .replace(/"([^"]+)"(\s*:)/g, '<span class="text-secondary">"$1"</span>$2')
-      .replace(/:\s*"([^"]+)"/g, ': <span class="text-primary">"$1"</span>')
+    return escapeHtml(line)
+      // Quoted key followed by colon: "key":
+      .replace(/&quot;([^&]+?)&quot;(\s*:)/g, '<span class="text-secondary">&quot;$1&quot;</span>$2')
+      // Quoted string value: : "value"
+      .replace(/:\s*&quot;([^&]+?)&quot;/g, ': <span class="text-primary">&quot;$1&quot;</span>')
+      // Numeric value: : 42
       .replace(/:\s*(\d+)/g, ': <span class="text-primary">$1</span>')
+      // Boolean
       .replace(/:\s*(true|false)/g, ': <span class="text-tertiary">$1</span>')
+      // null
       .replace(/:\s*(null)/g, ': <span class="text-outline">$1</span>')
+      // Brackets / braces (already escaped to entities? no -- [{}[\]] are
+      // not escaped by escapeHtml, they're not HTML-meaningful)
       .replace(/([{}[\]])/g, '<span class="text-secondary opacity-80">$1</span>');
   }
 </script>
