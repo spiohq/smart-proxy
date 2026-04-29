@@ -117,6 +117,7 @@ type ServerConfig struct {
 	PortDashboard     int
 	DashboardBindAddr string // SP_PROXY_DASHBOARD_BIND_ADDR; "127.0.0.1" by default
 	RegionBindAddr    string // SP_PROXY_REGION_BIND_ADDR; "127.0.0.1" by default
+	StrictMerchant    bool   // SP_PROXY_STRICT_MERCHANT; reject requests with no resolvable merchant
 	ShutdownTimeout   string
 }
 
@@ -152,6 +153,7 @@ func loadConfig(logger *slog.Logger) *Config {
 			PortDashboard:     iInt("SP_PROXY_PORT_DASHBOARD", 9090),
 			DashboardBindAddr: envStr("SP_PROXY_DASHBOARD_BIND_ADDR", "127.0.0.1"),
 			RegionBindAddr:    envStr("SP_PROXY_REGION_BIND_ADDR", "127.0.0.1"),
+			StrictMerchant:    iBool("SP_PROXY_STRICT_MERCHANT", false),
 			ShutdownTimeout:   envStr("SP_PROXY_SHUTDOWN_TIMEOUT", "30s"),
 		},
 		RateLimit: RateLimitConfig{

@@ -46,6 +46,10 @@ func main() {
 		os.Exit(1)
 	}
 	resolver := merchant.NewResolver(nil)
+	resolver.SetStrict(cfg.Server.StrictMerchant)
+	if cfg.Server.StrictMerchant {
+		slog.Info("strict merchant resolution enabled: requests without X-SP-Proxy-Merchant-Id or X-Amz-Access-Token are rejected with 400")
+	}
 
 	// Rate limiter
 	limiter := ratelimit.NewLimiter(
