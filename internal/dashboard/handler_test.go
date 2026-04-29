@@ -11,6 +11,7 @@ import (
 
 	"github.com/spiohq/smart-proxy/internal/audit"
 	"github.com/spiohq/smart-proxy/internal/bodies"
+	"github.com/spiohq/smart-proxy/internal/pii"
 	"github.com/spiohq/smart-proxy/internal/storage"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -96,6 +97,23 @@ func (m *mockBodyStore) Read(ctx context.Context, file string, offset int64, len
 	}, nil
 }
 func (m *mockBodyStore) Close() error { return nil }
+
+// mockBodyStoreMap is a body store whose Read method returns entries keyed by
+// filename. Used by tests that need to control the body content per log entry.
+type mockBodyStoreMap struct {
+	entries map[string]*bodies.BodyEntry
+}
+
+func (m *mockBodyStoreMap) Write(ctx context.Context, entry *bodies.BodyEntry) (string, int64, int, error) {
+	return "", 0, 0, nil
+}
+func (m *mockBodyStoreMap) Read(ctx context.Context, file string, offset int64, length int) (*bodies.BodyEntry, error) {
+	if e, ok := m.entries[file]; ok {
+		return e, nil
+	}
+	return &bodies.BodyEntry{ID: "missing"}, nil
+}
+func (m *mockBodyStoreMap) Close() error { return nil }
 
 // --- Tests ---
 
@@ -405,4 +423,121 @@ func TestSPA_AllReferencedAssetsExist(t *testing.T) {
 			assert.Equal(t, http.StatusOK, w.Code, "asset %s must return 200", path)
 		}
 	}
+}
+
+func TestHandleLogBody_ReadSideRedaction_LegacyMfnRequestBody(t *testing.T) {
+	// Simulate a JSONL entry written before F-02 closed the write-side leak:
+	// MFN createShipment POST with unredacted ShipFromAddress (the buyer).
+	// The read-side filter must redact on serve.
+	ls := &mockLogStore{
+		logs: []*storage.RequestLog{{
+			ID:                  "legacy-mfn-001",
+			Timestamp:           time.Now().UTC(),
+			Method:              "POST",
+			Path:                "/mfn/v0/shipments",
+			StatusCode:          200,
+			PIIRedactedRequest:  false, // legacy: write-side did not redact
+			PIIRedactedResponse: false,
+			BodyFile:            "legacy.jsonl",
+			BodyOffset:          0,
+			BodyLength:          400,
+		}},
+	}
+	bs := &mockBodyStoreMap{
+		entries: map[string]*bodies.BodyEntry{
+			"legacy.jsonl": {
+				ID:           "legacy-mfn-001",
+				RequestBody:  json.RawMessage(`{"ShipmentRequestDetails":{"AmazonOrderId":"903-3489051-5871062","ShipFromAddress":{"Name":"Real Buyer","Email":"buyer@example.com","AddressLine1":"300 Turnbull Ave"}}}`),
+				ResponseBody: json.RawMessage(`{"payload":{"ShipmentId":"S1"}}`),
+			},
+		},
+	}
+
+	engine := pii.NewEngine(pii.NewRegistry())
+	h := NewHandlerWithPII(ls, &mockAuditStore{}, bs, engine)
+	mux := NewMux(h)
+
+	req := httptest.NewRequest("GET", "/api/v1/logs/legacy-mfn-001/body", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	respBody := rec.Body.String()
+	assert.NotContains(t, respBody, "Real Buyer", "F-15: read-side filter must redact legacy MFN buyer name")
+	assert.NotContains(t, respBody, "buyer@example.com")
+	assert.NotContains(t, respBody, "300 Turnbull Ave")
+	assert.Contains(t, respBody, "903-3489051-5871062", "Order IDs are not direct PII; preserved")
+}
+
+func TestHandleLogBody_ReadSideRedaction_LegacyMessagingRequestBody(t *testing.T) {
+	ls := &mockLogStore{
+		logs: []*storage.RequestLog{{
+			ID:                  "legacy-msg-001",
+			Timestamp:           time.Now().UTC(),
+			Method:              "POST",
+			Path:                "/messaging/v1/orders/903-3489051-5871062/messages/createConfirmServiceDetails",
+			StatusCode:          200,
+			PIIRedactedRequest:  false,
+			PIIRedactedResponse: false,
+			BodyFile:            "legacy-msg.jsonl",
+			BodyOffset:          0,
+			BodyLength:          200,
+		}},
+	}
+	bs := &mockBodyStoreMap{
+		entries: map[string]*bodies.BodyEntry{
+			"legacy-msg.jsonl": {
+				ID:          "legacy-msg-001",
+				RequestBody: json.RawMessage(`{"message":{"text":"Hi Maria, see you at Hauptstrasse 42."}}`),
+			},
+		},
+	}
+
+	engine := pii.NewEngine(pii.NewRegistry())
+	h := NewHandlerWithPII(ls, &mockAuditStore{}, bs, engine)
+	mux := NewMux(h)
+
+	req := httptest.NewRequest("GET", "/api/v1/logs/legacy-msg-001/body", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	respBody := rec.Body.String()
+	assert.NotContains(t, respBody, "Maria", "F-15: read-side filter must redact legacy messaging text")
+	assert.NotContains(t, respBody, "Hauptstrasse")
+}
+
+func TestHandleLogBody_NoEngine_BodyReturnedVerbatim(t *testing.T) {
+	ls := &mockLogStore{
+		logs: []*storage.RequestLog{{
+			ID:         "no-engine-001",
+			Timestamp:  time.Now().UTC(),
+			Method:     "GET",
+			Path:       "/orders/v0/orders",
+			StatusCode: 200,
+			BodyFile:   "raw.jsonl",
+			BodyOffset: 0,
+			BodyLength: 100,
+		}},
+	}
+	bs := &mockBodyStoreMap{
+		entries: map[string]*bodies.BodyEntry{
+			"raw.jsonl": {
+				ID:           "no-engine-001",
+				ResponseBody: json.RawMessage(`{"data":"unfiltered"}`),
+			},
+		},
+	}
+
+	// Plain NewHandler -- no engine wired. Existing test setups behave like this.
+	h := NewHandler(ls, &mockAuditStore{}, bs)
+	mux := NewMux(h)
+
+	req := httptest.NewRequest("GET", "/api/v1/logs/no-engine-001/body", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "unfiltered",
+		"NewHandler without engine must NOT alter body content")
 }

@@ -182,7 +182,7 @@ func main() {
 	}
 
 	// Dashboard handler
-	dashHandler := dashboard.NewHandler(metaStore, auditStore, bodyStore)
+	dashHandler := dashboard.NewHandlerWithPII(metaStore, auditStore, bodyStore, piiEngine)
 	dashMux := dashboard.NewMux(dashHandler)
 
 	// Mount /metrics on dashboard mux (or separate port)

@@ -3,8 +3,10 @@ package dashboard
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"time"
 
+	"github.com/spiohq/smart-proxy/internal/endpoint"
 	"github.com/spiohq/smart-proxy/internal/storage"
 )
 
@@ -246,11 +248,64 @@ func (h *Handler) handleLogBody(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read-side redaction filter (F-15). Legacy entries written before F-02
+	// closed the write-side leak may contain unredacted PII; re-run the
+	// engine on both directions so the API never returns stored PII even
+	// when the metadata flag is misleading. After F-02 this is mostly
+	// belt-and-suspenders against future write-side bugs.
+	if h.piiEngine != nil {
+		classified := endpoint.Classify(entry.Path)
+		reg := h.piiEngine.Registry()
+
+		// Response side: same logic the async logger uses.
+		if body.ResponseBody != nil {
+			if reg.IsFullBodyPII(classified) {
+				body.ResponseBody = json.RawMessage(h.piiEngine.RedactFullBody(classified))
+			} else {
+				redacted, _ := h.piiEngine.RedactForLogging(classified, []byte(body.ResponseBody))
+				body.ResponseBody = json.RawMessage(redacted)
+			}
+		}
+
+		// Request side: only fires for non-GET methods. The engine's
+		// RedactRequestBodyForLogging needs the action-specific pattern for
+		// messaging POST endpoints; the dashboard does not have access to
+		// the original *http.Request, so we reconstruct the lookup using
+		// the stored Method+Path. RequestBodyPattern handles this method-aware
+		// lookup correctly.
+		if body.RequestBody != nil && entry.Method != "" && entry.Method != http.MethodGet {
+			// Build a synthetic request to drive RequestBodyPattern.
+			synth := &http.Request{Method: entry.Method, URL: mustURL(entry.Path)}
+			reqPattern := reg.RequestBodyPattern(synth)
+			if reqPattern != "" {
+				redacted, ok := h.piiEngine.RedactRequestBodyForLogging(reqPattern, []byte(body.RequestBody))
+				if ok {
+					body.RequestBody = json.RawMessage(redacted)
+				} else if reg.IsFullBodyPII(classified) {
+					// Fail-closed unknown path: same fallback as the async logger.
+					body.RequestBody = json.RawMessage(h.piiEngine.RedactFullBody(reqPattern))
+				}
+			}
+		}
+	}
+
 	resp := map[string]json.RawMessage{
 		"requestBody":  body.RequestBody,
 		"responseBody": body.ResponseBody,
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// mustURL parses a stored path into a minimal *url.URL for use as a synthetic
+// request URL when re-running redaction read-side. Stored paths come from
+// real requests, so parsing should not fail; if it does we fall back to a
+// URL that exercises the same code path safely.
+func mustURL(path string) *url.URL {
+	u, err := url.Parse(path)
+	if err != nil {
+		return &url.URL{Path: path}
+	}
+	return u
 }
 
 func (h *Handler) handleMerchants(w http.ResponseWriter, r *http.Request) {
