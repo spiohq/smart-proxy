@@ -164,6 +164,33 @@ func TestLoggingMiddleware_RedactsRequestHeaders(t *testing.T) {
 	assert.Equal(t, "visible", allBodies[0].RequestHeaders["X-Custom"])
 }
 
+func TestLoggingMiddleware_RedactsResponseHeaders(t *testing.T) {
+	// F-12: Set-Cookie (and any other SensitiveHeaders entry) coming back
+	// from upstream must be redacted before persistence, mirror of the
+	// request-side test above.
+	logger, _, bs := setupTestLogger(t)
+	registry := pii.NewRegistry()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Set-Cookie", "session=secret-cookie-value")
+		w.Header().Set("X-Public", "ok")
+		w.WriteHeader(200)
+	})
+
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req = withMerchant(req, "merchant-a")
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+	logger.Close()
+
+	allBodies := bs.allEntries()
+	require.Len(t, allBodies, 1)
+	assert.Equal(t, "[REDACTED]", allBodies[0].ResponseHeaders["Set-Cookie"])
+	assert.Equal(t, "ok", allBodies[0].ResponseHeaders["X-Public"])
+}
+
 func TestLoggingMiddleware_CapsCapturedBodies(t *testing.T) {
 	logger, _, bs := setupTestLogger(t)
 	registry := pii.NewRegistry()

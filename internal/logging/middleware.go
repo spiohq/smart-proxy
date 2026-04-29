@@ -69,7 +69,10 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 			cacheStatus := capture.Header().Get("X-SP-Proxy-Cache")
 
 			reqHeaders := headerToMap(pii.RedactHeaders(r.Header))
-			respHeaders := headerToMap(capture.Header())
+			// Response headers go through the same SensitiveHeaders filter
+			// as request headers (F-12). Amazon does not normally emit
+			// session-bearing values, but the symmetry is defensive.
+			respHeaders := headerToMap(pii.RedactHeaders(capture.Header()))
 
 			meta := &storage.RequestLog{
 				ID:                    requestID,
