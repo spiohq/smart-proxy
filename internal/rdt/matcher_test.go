@@ -9,13 +9,13 @@ import (
 
 func TestMatchPIIOperation_RestrictedEndpoints(t *testing.T) {
 	tests := []struct {
-		name           string
-		method         string
-		path           string
-		wantMatch      bool
-		wantGeneric    string   // the generic path form for RDT minting
-		wantDataElems  []string // expected dataElements (nil if none)
-		wantCacheable  bool
+		name          string
+		method        string
+		path          string
+		wantMatch     bool
+		wantGeneric   string   // the generic path form for RDT minting
+		wantDataElems []string // expected dataElements (nil if none)
+		wantCacheable bool
 	}{
 		// ── Orders v0: getOrders (list) ────────────────────────────────────
 		{

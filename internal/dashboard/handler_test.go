@@ -578,7 +578,7 @@ func TestHandleLogBody_ReadSideRedaction_LegacyOrdersV0ResponseBody(t *testing.T
 	bs := &mockBodyStoreMap{
 		entries: map[string]*bodies.BodyEntry{
 			"legacy-orders.jsonl": {
-				ID: id,
+				ID:           id,
 				ResponseBody: json.RawMessage(`{"payload":{"Orders":[{"AmazonOrderId":"903-3489051-5871062","BuyerInfo":{"BuyerEmail":"buyer@example.com","BuyerName":"Maria Schmidt"},"ShippingAddress":{"Name":"Maria Schmidt","AddressLine1":"Hauptstrasse 42"}}]}}`),
 			},
 		},

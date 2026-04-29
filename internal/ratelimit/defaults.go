@@ -17,15 +17,15 @@ type BucketParams struct {
 var DefaultBucketParams = map[string]BucketParams{
 	// ── Orders API v0 ──────────────────────────────────────────────────
 	// Dynamic usage plans  -  values below are defaults; high-volume sellers get more.
-	"/orders/v0/orders":                                {Rate: 0.0167, Burst: 20},  // getOrders ~1 req/min
-	"/orders/v0/orders/{orderId}":                      {Rate: 0.5, Burst: 30},     // getOrder
-	"/orders/v0/orders/{orderId}/orderItems":           {Rate: 0.5, Burst: 30},     // getOrderItems
-	"/orders/v0/orders/{orderId}/buyerInfo":            {Rate: 0.5, Burst: 30},     // getOrderBuyerInfo (RDT)
-	"/orders/v0/orders/{orderId}/address":              {Rate: 0.5, Burst: 30},     // getOrderAddress (RDT)
-	"/orders/v0/orders/{orderId}/orderItems/buyerInfo": {Rate: 0.5, Burst: 30},     // getOrderItemsBuyerInfo (RDT)
-	"/orders/v0/orders/{orderId}/regulatedInfo":        {Rate: 0.5, Burst: 30},     // getOrderRegulatedInfo / updateVerificationStatus
-	"/orders/v0/orders/{orderId}/shipmentConfirmation": {Rate: 2.0, Burst: 10},     // confirmShipment (POST)
-	"/orders/v0/orders/{orderId}/shipment":             {Rate: 5.0, Burst: 15},     // updateShipmentStatus (POST)
+	"/orders/v0/orders":                                {Rate: 0.0167, Burst: 20}, // getOrders ~1 req/min
+	"/orders/v0/orders/{orderId}":                      {Rate: 0.5, Burst: 30},    // getOrder
+	"/orders/v0/orders/{orderId}/orderItems":           {Rate: 0.5, Burst: 30},    // getOrderItems
+	"/orders/v0/orders/{orderId}/buyerInfo":            {Rate: 0.5, Burst: 30},    // getOrderBuyerInfo (RDT)
+	"/orders/v0/orders/{orderId}/address":              {Rate: 0.5, Burst: 30},    // getOrderAddress (RDT)
+	"/orders/v0/orders/{orderId}/orderItems/buyerInfo": {Rate: 0.5, Burst: 30},    // getOrderItemsBuyerInfo (RDT)
+	"/orders/v0/orders/{orderId}/regulatedInfo":        {Rate: 0.5, Burst: 30},    // getOrderRegulatedInfo / updateVerificationStatus
+	"/orders/v0/orders/{orderId}/shipmentConfirmation": {Rate: 2.0, Burst: 10},    // confirmShipment (POST)
+	"/orders/v0/orders/{orderId}/shipment":             {Rate: 5.0, Burst: 15},    // updateShipmentStatus (POST)
 
 	// ── Orders API v2026-01-01 ─────────────────────────────────────────
 	"/orders/2026-01-01/orders":           {Rate: 0.0056, Burst: 20}, // searchOrders ~1 req/3min  -  more restrictive than v0
@@ -44,7 +44,7 @@ var DefaultBucketParams = map[string]BucketParams{
 
 	// ── Reports API v2021-06-30 ────────────────────────────────────────
 	"/reports/2021-06-30/reports":                {Rate: 0.0222, Burst: 10}, // getReports
-	"/reports/2021-06-30/reports/{reportId}":     {Rate: 2.0, Burst: 15},   // getReport
+	"/reports/2021-06-30/reports/{reportId}":     {Rate: 2.0, Burst: 15},    // getReport
 	"/reports/2021-06-30/schedules":              {Rate: 0.0222, Burst: 10}, // getReportSchedules / createReportSchedule
 	"/reports/2021-06-30/schedules/{scheduleId}": {Rate: 0.0222, Burst: 10}, // getReportSchedule / cancelReportSchedule
 	"/reports/2021-06-30/documents/{documentId}": {Rate: 0.0167, Burst: 15}, // getReportDocument
@@ -94,10 +94,10 @@ var DefaultBucketParams = map[string]BucketParams{
 
 	// ── Fulfillment Inbound API v2024-03-20 ────────────────────────────
 	// Most operations: Rate 2, Burst 2-30. Some elevated to Rate 5 in June 2025.
-	"/fba/inbound/v2024-03-20/inboundPlans":                           {Rate: 2.0, Burst: 6},  // listInboundPlans
-	"/fba/inbound/v2024-03-20/inboundPlans/{planId}":                  {Rate: 2.0, Burst: 6},  // getInboundPlan
-	"/fba/inbound/v2024-03-20/inboundPlans/{planId}/packingOptions":   {Rate: 2.0, Burst: 2},  // generatePackingOptions
-	"/fba/inbound/v2024-03-20/inboundPlans/{planId}/placementOptions": {Rate: 2.0, Burst: 2},  // generatePlacementOptions
+	"/fba/inbound/v2024-03-20/inboundPlans":                           {Rate: 2.0, Burst: 6}, // listInboundPlans
+	"/fba/inbound/v2024-03-20/inboundPlans/{planId}":                  {Rate: 2.0, Burst: 6}, // getInboundPlan
+	"/fba/inbound/v2024-03-20/inboundPlans/{planId}/packingOptions":   {Rate: 2.0, Burst: 2}, // generatePackingOptions
+	"/fba/inbound/v2024-03-20/inboundPlans/{planId}/placementOptions": {Rate: 2.0, Burst: 2}, // generatePlacementOptions
 
 	// ── Fulfillment Inbound API v0 (Legacy) ────────────────────────────
 	"/fba/inbound/v0/prepInstructions":                    {Rate: 2.0, Burst: 30},

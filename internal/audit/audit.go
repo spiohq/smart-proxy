@@ -56,8 +56,8 @@ func (a *AuditLogger) Log(ctx context.Context, eventType, source, message string
 		Timestamp: time.Now().UTC(),
 		EventType: eventType,
 		Source:    source,
-		Message:  message,
-		Metadata: metadata,
+		Message:   message,
+		Metadata:  metadata,
 	}
 	return a.store.LogAuditEvent(ctx, event)
 }

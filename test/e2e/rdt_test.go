@@ -27,7 +27,7 @@ func rdtTokenResponse(token string) []byte {
 
 func jsonHeaders() http.Header {
 	return http.Header{
-		"Content-Type":            []string{"application/json"},
+		"Content-Type":           []string{"application/json"},
 		"x-amzn-RateLimit-Limit": []string{"1.0"},
 	}
 }

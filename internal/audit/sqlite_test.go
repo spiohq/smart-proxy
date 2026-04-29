@@ -43,7 +43,7 @@ func TestSQLiteStore_LogAuditEvent(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 		EventType: "startup",
 		Source:    "main",
-		Message:  "proxy starting",
+		Message:   "proxy starting",
 		Metadata:  map[string]any{"version": "dev"},
 	}
 
@@ -74,7 +74,7 @@ func TestSQLiteStore_PurgeOlderThan(t *testing.T) {
 		Timestamp: time.Now().UTC().Add(-48 * time.Hour),
 		EventType: "startup",
 		Source:    "main",
-		Message:  "old event",
+		Message:   "old event",
 	}
 	require.NoError(t, store.LogAuditEvent(ctx, old))
 
@@ -84,7 +84,7 @@ func TestSQLiteStore_PurgeOlderThan(t *testing.T) {
 		Timestamp: time.Now().UTC(),
 		EventType: "startup",
 		Source:    "main",
-		Message:  "recent event",
+		Message:   "recent event",
 	}
 	require.NoError(t, store.LogAuditEvent(ctx, recent))
 

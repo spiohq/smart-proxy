@@ -87,7 +87,7 @@ func TestE2E_Headers_UpstreamResponseHeaders(t *testing.T) {
 	env.MockSPAPI.SetResponse("/catalog/v0/items", mock.Response{
 		StatusCode: 200,
 		Headers: http.Header{
-			"Content-Type":            []string{"application/json"},
+			"Content-Type":           []string{"application/json"},
 			"x-amzn-RequestId":       []string{"amz-req-12345"},
 			"x-amzn-RateLimit-Limit": []string{"2.0"},
 			"X-Custom-Response":      []string{"from-upstream"},
