@@ -132,7 +132,7 @@ func (l *AsyncLogger) flush(batch []*LogEntry) {
 }
 
 func (l *AsyncLogger) redactBody(entry *LogEntry) {
-	if !entry.Meta.PIIRedacted || l.piiEngine == nil {
+	if (!entry.Meta.PIIRedactedRequest && !entry.Meta.PIIRedactedResponse) || l.piiEngine == nil {
 		return
 	}
 

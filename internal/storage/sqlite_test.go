@@ -458,3 +458,27 @@ func TestSQLiteStore_Maintain(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, got)
 }
+
+func TestNewSQLiteStore_Migration007_AddsPIIColumns(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	store, err := NewSQLiteStore(dbPath)
+	require.NoError(t, err)
+	defer store.Close()
+
+	rows, err := store.DB().Query("PRAGMA table_info(request_logs)")
+	require.NoError(t, err)
+	defer rows.Close()
+
+	cols := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull, pk int
+		var dflt sql.NullString
+		require.NoError(t, rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk))
+		cols[name] = true
+	}
+	assert.True(t, cols["pii_redacted_request"], "migration 007 must add pii_redacted_request")
+	assert.True(t, cols["pii_redacted_response"], "migration 007 must add pii_redacted_response")
+}

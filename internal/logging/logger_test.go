@@ -218,7 +218,7 @@ func TestAsyncLogger_PIIRedaction(t *testing.T) {
 			Method:      "GET",
 			Path:        "/orders/v0/orders",
 			StatusCode:  200,
-			PIIRedacted: true,
+			PIIRedactedResponse: true,
 		},
 		Body: &bodies.BodyEntry{
 			ID: "pii-001",
@@ -277,7 +277,7 @@ func TestAsyncLogger_FullBodyPIIEndpoint(t *testing.T) {
 			Method:      "GET",
 			Path:        "/orders/v0/orders/123/buyerInfo",
 			StatusCode:  200,
-			PIIRedacted: true,
+			PIIRedactedResponse: true,
 		},
 		Body: &bodies.BodyEntry{
 			ID:           "fullpii-001",

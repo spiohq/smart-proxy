@@ -72,7 +72,11 @@ type RequestLog struct {
 	QueueWaitMs           int64
 	UpstreamLatencyMs     int64
 	TotalLatencyMs        int64
-	PIIRedacted           bool
+	// PIIRedactedRequest reports whether the request body was redacted before
+	// persistence. PIIRedactedResponse reports the same for the response body.
+	// Both default to false; logger sets each independently.
+	PIIRedactedRequest  bool
+	PIIRedactedResponse bool
 	AmazonRequestID       string
 	RequestContentLength  int64
 	ResponseContentLength int64

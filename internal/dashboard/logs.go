@@ -77,7 +77,9 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 			UpstreamLatencyMs:     row.UpstreamLatencyMs,
 			RequestContentLength:  row.RequestContentLength,
 			ResponseContentLength: row.ResponseContentLength,
-			PIIRedacted:           row.PIIRedacted,
+			PIIRedactedRequest:    row.PIIRedactedRequest,
+			PIIRedactedResponse:   row.PIIRedactedResponse,
+			PIIRedacted:           row.PIIRedactedRequest || row.PIIRedactedResponse,
 			AmazonRequestID:       row.AmazonRequestID,
 			ErrorReason:           row.ErrorReason,
 		})
@@ -101,7 +103,9 @@ type logListEntry struct {
 	UpstreamLatencyMs     int64     `json:"upstreamLatencyMs"`
 	RequestContentLength  int64     `json:"requestContentLength"`
 	ResponseContentLength int64     `json:"responseContentLength"`
-	PIIRedacted           bool      `json:"piiRedacted"`
+	PIIRedactedRequest    bool      `json:"piiRedactedRequest"`
+	PIIRedactedResponse   bool      `json:"piiRedactedResponse"`
+	PIIRedacted           bool      `json:"piiRedacted"` // legacy OR shim -- keep for one release
 	AmazonRequestID       string    `json:"amazonRequestId,omitempty"`
 	ErrorReason           string    `json:"errorReason,omitempty"`
 }
@@ -127,7 +131,9 @@ type logDetailResponse struct {
 	TotalLatencyMs        int64             `json:"totalLatencyMs"`
 	RequestContentLength  int64             `json:"requestContentLength"`
 	ResponseContentLength int64             `json:"responseContentLength"`
-	PIIRedacted           bool              `json:"piiRedacted"`
+	PIIRedactedRequest    bool              `json:"piiRedactedRequest"`
+	PIIRedactedResponse   bool              `json:"piiRedactedResponse"`
+	PIIRedacted           bool              `json:"piiRedacted"` // legacy OR shim -- keep for one release
 	AmazonRequestID       string            `json:"amazonRequestId,omitempty"`
 	ErrorReason           string            `json:"errorReason,omitempty"`
 	HasBody               bool              `json:"hasBody"`
@@ -178,7 +184,9 @@ func (h *Handler) handleLogByID(w http.ResponseWriter, r *http.Request) {
 		TotalLatencyMs:        entry.TotalLatencyMs,
 		RequestContentLength:  entry.RequestContentLength,
 		ResponseContentLength: entry.ResponseContentLength,
-		PIIRedacted:           entry.PIIRedacted,
+		PIIRedactedRequest:    entry.PIIRedactedRequest,
+		PIIRedactedResponse:   entry.PIIRedactedResponse,
+		PIIRedacted:           entry.PIIRedactedRequest || entry.PIIRedactedResponse,
 		AmazonRequestID:       entry.AmazonRequestID,
 		ErrorReason:           entry.ErrorReason,
 		HasBody:               hasBody,

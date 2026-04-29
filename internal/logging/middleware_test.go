@@ -133,7 +133,7 @@ func TestLoggingMiddleware_PIIEndpoint(t *testing.T) {
 
 	allMeta := ms.allEntries()
 	require.Len(t, allMeta, 1)
-	assert.True(t, allMeta[0].PIIRedacted)
+	assert.True(t, allMeta[0].PIIRedactedResponse)
 }
 
 func TestLoggingMiddleware_RedactsRequestHeaders(t *testing.T) {

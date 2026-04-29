@@ -137,7 +137,7 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 				}
 
 				if piiRegistry.ContainsPII(r) {
-					meta.PIIRedacted = true
+					meta.PIIRedactedResponse = true
 				}
 
 				entry.Body = bodyEntry

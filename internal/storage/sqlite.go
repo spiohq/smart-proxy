@@ -90,10 +90,10 @@ func (s *SQLiteStore) LogRequestBatch(ctx context.Context, entries []*RequestLog
 		request_content_length, response_content_length,
 		cache_status, queued, queue_wait_ms,
 		upstream_latency_ms, total_latency_ms,
-		pii_redacted, amazon_request_id,
+		pii_redacted_request, pii_redacted_response, amazon_request_id,
 		body_file, body_offset, body_length,
 		cached_from_id, error_reason
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare insert: %w", err)
 	}
@@ -106,7 +106,7 @@ func (s *SQLiteStore) LogRequestBatch(ctx context.Context, entries []*RequestLog
 			e.RequestContentLength, e.ResponseContentLength,
 			e.CacheStatus, e.Queued, e.QueueWaitMs,
 			e.UpstreamLatencyMs, e.TotalLatencyMs,
-			e.PIIRedacted, e.AmazonRequestID,
+			e.PIIRedactedRequest, e.PIIRedactedResponse, e.AmazonRequestID,
 			e.BodyFile, e.BodyOffset, e.BodyLength,
 			e.CachedFromID, e.ErrorReason,
 		)
@@ -175,7 +175,7 @@ func (s *SQLiteStore) QueryByTimeRange(ctx context.Context, from, to time.Time) 
 			request_content_length, response_content_length,
 			cache_status, queued, queue_wait_ms,
 			upstream_latency_ms, total_latency_ms,
-			pii_redacted, amazon_request_id,
+			pii_redacted_request, pii_redacted_response, amazon_request_id,
 			body_file, body_offset, body_length,
 			cached_from_id, error_reason
 		 FROM request_logs WHERE timestamp >= ? AND timestamp < ?
@@ -195,7 +195,7 @@ func (s *SQLiteStore) QueryByTimeRange(ctx context.Context, from, to time.Time) 
 			&e.RequestContentLength, &e.ResponseContentLength,
 			&e.CacheStatus, &e.Queued, &e.QueueWaitMs,
 			&e.UpstreamLatencyMs, &e.TotalLatencyMs,
-			&e.PIIRedacted, &e.AmazonRequestID,
+			&e.PIIRedactedRequest, &e.PIIRedactedResponse, &e.AmazonRequestID,
 			&e.BodyFile, &e.BodyOffset, &e.BodyLength,
 			&e.CachedFromID, &e.ErrorReason,
 		)
@@ -217,7 +217,7 @@ func (s *SQLiteStore) QueryByID(ctx context.Context, id string) (*RequestLog, er
 			request_content_length, response_content_length,
 			cache_status, queued, queue_wait_ms,
 			upstream_latency_ms, total_latency_ms,
-			pii_redacted, amazon_request_id,
+			pii_redacted_request, pii_redacted_response, amazon_request_id,
 			body_file, body_offset, body_length,
 			cached_from_id, error_reason
 		 FROM request_logs WHERE id = ?`, id,
@@ -227,7 +227,7 @@ func (s *SQLiteStore) QueryByID(ctx context.Context, id string) (*RequestLog, er
 		&e.RequestContentLength, &e.ResponseContentLength,
 		&e.CacheStatus, &e.Queued, &e.QueueWaitMs,
 		&e.UpstreamLatencyMs, &e.TotalLatencyMs,
-		&e.PIIRedacted, &e.AmazonRequestID,
+		&e.PIIRedactedRequest, &e.PIIRedactedResponse, &e.AmazonRequestID,
 		&e.BodyFile, &e.BodyOffset, &e.BodyLength,
 		&e.CachedFromID, &e.ErrorReason,
 	)
@@ -265,7 +265,7 @@ func (s *SQLiteStore) QueryLogs(ctx context.Context, filter LogFilter) ([]*Reque
 		request_content_length, response_content_length,
 		cache_status, queued, queue_wait_ms,
 		upstream_latency_ms, total_latency_ms,
-		pii_redacted, amazon_request_id,
+		pii_redacted_request, pii_redacted_response, amazon_request_id,
 		body_file, body_offset, body_length,
 		cached_from_id, error_reason
 	 FROM request_logs` + where + ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`
@@ -286,7 +286,7 @@ func (s *SQLiteStore) QueryLogs(ctx context.Context, filter LogFilter) ([]*Reque
 			&e.RequestContentLength, &e.ResponseContentLength,
 			&e.CacheStatus, &e.Queued, &e.QueueWaitMs,
 			&e.UpstreamLatencyMs, &e.TotalLatencyMs,
-			&e.PIIRedacted, &e.AmazonRequestID,
+			&e.PIIRedactedRequest, &e.PIIRedactedResponse, &e.AmazonRequestID,
 			&e.BodyFile, &e.BodyOffset, &e.BodyLength,
 			&e.CachedFromID, &e.ErrorReason,
 		)
