@@ -28,6 +28,21 @@ When `SP_PROXY_BODIES_BACKEND=s3`, set `SP_PROXY_S3_SSE` to enforce server-side 
 
 **Application-level encryption is intentionally not implemented.** Operators provide at-rest protection via volume encryption (EBS, LUKS, dm-crypt) and S3 server-side encryption (`SP_PROXY_S3_SSE`).
 
+### S3 backend credentials
+
+If you configure `SP_PROXY_BODIES_BACKEND=s3` with a long-lived IAM user key (`AKIA...` access-key-ID prefix), the proxy emits a `dpp_compliance_warning` audit event on every startup until you migrate to STS-issued credentials AND set `SP_PROXY_S3_SSE=AES256` (or `aws:kms`). Long-lived static keys plus plaintext (no-SSE) buckets compound the blast radius of a host compromise; rotate to short-lived role-assumed credentials and enforce server-side encryption.
+
+The proxy itself never persists `SP_PROXY_S3_ACCESS_KEY` -- it lives in process memory only and is passed to the AWS SDK. The warning is operator-help to nudge a compounding-risk configuration toward the safer pattern.
+
+### Prometheus metrics endpoint
+
+By default `/metrics` is mounted on the dashboard port (loopback-only when `SP_PROXY_DASHBOARD_BIND_ADDR=127.0.0.1`). If you front the dashboard with an authenticating reverse proxy, decide explicitly whether scraping should share that auth boundary:
+
+- **Easiest:** keep `SP_PROXY_PROMETHEUS_PORT=0` (default) and let your reverse-proxy / scraper auth at the same gate as the dashboard.
+- **Cleaner separation:** set `SP_PROXY_PROMETHEUS_PORT=9091` (or any other port). Scraping then has its own listener you can firewall independently of the dashboard.
+
+Prometheus labels include `merchant`, so a scrape job exposed beyond the operator's network would leak per-tenant traffic shape. Keep `/metrics` on a network where only the metrics collector can reach it.
+
 ### Network exposure
 
 Smart Proxy is designed to run as a **sidecar or private-network component**. It MUST NOT be exposed directly to the public internet without an authenticating reverse proxy in front of it. The proxy honors `X-SP-Proxy-Merchant-Id` for tenant identification; an unauthenticated public endpoint would let any caller self-claim any merchant key.

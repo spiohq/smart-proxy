@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -147,6 +148,19 @@ func main() {
 	// trail is the operator's evidence, in a DPP audit, that they were warned
 	// about non-conformant defaults at startup.
 	for _, w := range cfg.Warnings() {
+		slog.Warn("configuration warning", "message", w)
+		_ = auditLogger.Log(ctx, audit.EventDPPComplianceWarning, "config", w, nil)
+	}
+
+	// F-21 helper: nudge operators away from long-lived IAM-user keys for
+	// the proxy's own S3 access. The proxy itself does not store the key
+	// (it only holds it in-memory for the AWS SDK), but a static AKIA...
+	// secret paired with a plaintext bucket compounds blast radius if the
+	// host is compromised. STS / role assumption is the safer path; pair
+	// it with SP_PROXY_S3_SSE so PutObject calls enforce server-side
+	// encryption rather than relying on bucket-default behavior.
+	if matched, _ := regexp.MatchString(`^AKIA[A-Z0-9]{16}$`, cfg.Bodies.S3.AccessKey); matched && cfg.Bodies.S3.SSE == "" {
+		w := "SP_PROXY_S3_ACCESS_KEY looks like a long-lived IAM user key (AKIA...) and SP_PROXY_S3_SSE is empty. Migrate to STS / role assumption and set SP_PROXY_S3_SSE=AES256 (or aws:kms) to enforce server-side encryption."
 		slog.Warn("configuration warning", "message", w)
 		_ = auditLogger.Log(ctx, audit.EventDPPComplianceWarning, "config", w, nil)
 	}
