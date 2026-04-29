@@ -143,6 +143,57 @@ func TestHandleLogs(t *testing.T) {
 	assert.Len(t, rows, 1)
 }
 
+// ── Status filter validation (F-18) ──────────────────────────────────────
+
+func TestHandleLogs_StatusFilter_RejectsBogus(t *testing.T) {
+	// SQLite silently coerces non-numeric strings to 0 against an INTEGER
+	// column, so without validation "?status=garbage" would quietly return
+	// rows where status_code=0 (effectively empty). Validate at the
+	// handler so bad input becomes 400 instead of confusing empty
+	// results.
+	ls := &mockLogStore{}
+	h := NewHandler(ls, &mockAuditStore{}, &mockBodyStore{})
+	mux := NewMux(h)
+
+	for _, bogus := range []string{"garbage", "abc", "200abc", "999", "0xx", "abcde", "-1", "6xx", "20", "2000"} {
+		t.Run(bogus, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/api/v1/logs?status="+bogus, nil)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code,
+				"status=%q must be rejected with 400", bogus)
+		})
+	}
+}
+
+func TestHandleLogs_StatusFilter_AcceptsValid(t *testing.T) {
+	ls := &mockLogStore{}
+	h := NewHandler(ls, &mockAuditStore{}, &mockBodyStore{})
+	mux := NewMux(h)
+
+	for _, ok := range []string{"200", "404", "500", "4xx", "5xx", "1xx", "2xx", "3xx"} {
+		t.Run(ok, func(t *testing.T) {
+			// Note: "1xx" is valid syntactically; whether 1xx codes appear
+			// in real data is a separate question. The regex accepts it.
+			req := httptest.NewRequest("GET", "/api/v1/logs?status="+ok, nil)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code, "status=%q must be accepted", ok)
+		})
+	}
+}
+
+func TestHandleLogs_StatusFilter_EmptyIsAccepted(t *testing.T) {
+	ls := &mockLogStore{}
+	h := NewHandler(ls, &mockAuditStore{}, &mockBodyStore{})
+	mux := NewMux(h)
+
+	req := httptest.NewRequest("GET", "/api/v1/logs", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code, "missing status filter must NOT be a 400")
+}
+
 func TestHandleLogByID(t *testing.T) {
 	ls := &mockLogStore{
 		logs: []*storage.RequestLog{

@@ -298,6 +298,16 @@ func (s *SQLiteStore) QueryLogs(ctx context.Context, filter LogFilter) ([]*Reque
 	return result, total, rows.Err()
 }
 
+// escapeLikePrefix escapes SQLite LIKE wildcards (%, _) and the escape
+// character itself so that user input is matched literally rather than
+// as a pattern. Pair with `LIKE ? ESCAPE '\'` in the SQL.
+//
+// Pentest finding F-17.
+func escapeLikePrefix(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
+}
+
 func buildLogWhereClause(f LogFilter) (string, []any) {
 	var clauses []string
 	var args []any
@@ -311,16 +321,16 @@ func buildLogWhereClause(f LogFilter) (string, []any) {
 		args = append(args, f.To.UTC())
 	}
 	if f.Merchant != "" {
-		clauses = append(clauses, "merchant_key LIKE ?")
-		args = append(args, f.Merchant+"%")
+		clauses = append(clauses, `merchant_key LIKE ? ESCAPE '\'`)
+		args = append(args, escapeLikePrefix(f.Merchant)+"%")
 	}
 	if f.Region != "" {
 		clauses = append(clauses, "region = ?")
 		args = append(args, f.Region)
 	}
 	if f.Endpoint != "" {
-		clauses = append(clauses, "path LIKE ?")
-		args = append(args, f.Endpoint+"%")
+		clauses = append(clauses, `path LIKE ? ESCAPE '\'`)
+		args = append(args, escapeLikePrefix(f.Endpoint)+"%")
 	}
 	if f.Status != "" {
 		if len(f.Status) == 3 && f.Status[1:] == "xx" {
@@ -370,9 +380,9 @@ func (s *SQLiteStore) DistinctMerchants(ctx context.Context, prefix string, limi
 	var args []any
 	if prefix != "" {
 		query = `SELECT merchant_key FROM request_logs
-			WHERE merchant_key LIKE ? AND merchant_key != ''
+			WHERE merchant_key LIKE ? ESCAPE '\' AND merchant_key != ''
 			GROUP BY merchant_key ORDER BY MAX(timestamp) DESC LIMIT ?`
-		args = []any{prefix + "%", limit}
+		args = []any{escapeLikePrefix(prefix) + "%", limit}
 	} else {
 		query = `SELECT merchant_key FROM request_logs
 			WHERE merchant_key != ''

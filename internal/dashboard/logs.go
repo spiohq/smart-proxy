@@ -4,11 +4,18 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"regexp"
 	"time"
 
 	"github.com/spiohq/smart-proxy/internal/endpoint"
 	"github.com/spiohq/smart-proxy/internal/storage"
 )
+
+// statusFilterRe constrains the ?status= query parameter on /api/v1/logs.
+// Three-digit codes (200, 404) or Nxx buckets (4xx, 5xx) only.
+//
+// Pentest finding F-18.
+var statusFilterRe = regexp.MustCompile(`^([1-5][0-9]{2}|[1-5]xx)$`)
 
 func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 	from, to, err := parseTimeRange(r, 1*time.Hour)
@@ -42,13 +49,24 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 		maxLatency = int64(v)
 	}
 
+	// Validate status filter (F-18). SQLite silently coerces non-numeric
+	// strings to 0 against an INTEGER column, so "?status=garbage"
+	// quietly returns rows where status_code=0 (i.e. nothing). Reject
+	// anything that's not a three-digit code or an Nxx bucket so the
+	// behavior is unambiguous to operators.
+	statusParam := r.URL.Query().Get("status")
+	if statusParam != "" && !statusFilterRe.MatchString(statusParam) {
+		writeError(w, http.StatusBadRequest, "invalid status filter (want 200, 4xx, etc.)")
+		return
+	}
+
 	filter := storage.LogFilter{
 		From:        from,
 		To:          to,
 		Merchant:    r.URL.Query().Get("merchant"),
 		Region:      r.URL.Query().Get("region"),
 		Endpoint:    r.URL.Query().Get("endpoint"),
-		Status:      r.URL.Query().Get("status"),
+		Status:      statusParam,
 		CacheStatus: r.URL.Query().Get("cacheStatus"),
 		Method:      r.URL.Query().Get("method"),
 		Queued:      r.URL.Query().Get("queued"),

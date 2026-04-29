@@ -482,3 +482,54 @@ func TestNewSQLiteStore_Migration007_AddsPIIColumns(t *testing.T) {
 	assert.True(t, cols["pii_redacted_request"], "migration 007 must add pii_redacted_request")
 	assert.True(t, cols["pii_redacted_response"], "migration 007 must add pii_redacted_response")
 }
+
+// ── LIKE wildcard escape (F-17) ──────────────────────────────────────────
+
+func TestQueryLogs_LikeWildcardInputIsEscaped(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	store, err := NewSQLiteStore(dbPath)
+	require.NoError(t, err)
+	defer store.Close()
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, store.LogRequestBatch(ctx, []*RequestLog{
+		{ID: "1", Timestamp: now, MerchantKey: "abc", Method: "GET", Path: "/", StatusCode: 200},
+		{ID: "2", Timestamp: now, MerchantKey: "axc", Method: "GET", Path: "/", StatusCode: 200},
+		{ID: "3", Timestamp: now, MerchantKey: "_bc", Method: "GET", Path: "/", StatusCode: 200},
+	}))
+
+	// Plain prefix returns only "abc".
+	rows, _, err := store.QueryLogs(ctx, LogFilter{Merchant: "abc"})
+	require.NoError(t, err)
+	assert.Len(t, rows, 1)
+
+	// "_" must be matched literally (now that we escape), so "_bc" matches
+	// only the row with merchant_key="_bc", not "abc"/"axc". Without the
+	// escape, "_" would be the LIKE single-char wildcard and match all of
+	// abc/axc/_bc.
+	rows, _, err = store.QueryLogs(ctx, LogFilter{Merchant: "_bc"})
+	require.NoError(t, err)
+	assert.Len(t, rows, 1, "underscore must be escaped, not used as LIKE wildcard")
+
+	// "%" must also be escaped (cannot match all rows in production).
+	rows, _, err = store.QueryLogs(ctx, LogFilter{Merchant: "%"})
+	require.NoError(t, err)
+	assert.Empty(t, rows, "percent must be escaped, not used as LIKE wildcard")
+}
+
+func TestEscapeLikePrefix_HandlesAllSpecials(t *testing.T) {
+	cases := map[string]string{
+		"plain":    "plain",
+		"a%b":      `a\%b`,
+		"a_b":      `a\_b`,
+		`a\b`:      `a\\b`,
+		"%_\\mix":  `\%\_\\mix`,
+	}
+	for in, want := range cases {
+		t.Run(in, func(t *testing.T) {
+			assert.Equal(t, want, escapeLikePrefix(in))
+		})
+	}
+}
