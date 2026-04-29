@@ -155,9 +155,27 @@ func (l *AsyncLogger) redactBody(entry *LogEntry) {
 	if entry.Meta.PIIRedactedRequest && entry.Body.RequestBody != nil {
 		reqEndpoint := entry.RequestBodyEndpoint
 		if reqEndpoint == "" {
+			// Defensive fallback: middleware should always set this when it
+			// sets PIIRedactedRequest. If a future caller bypasses the
+			// middleware (e.g. legacy-record reprocessing), fall back to
+			// the raw classified path so the engine can at least try.
 			reqEndpoint = classifiedPath
 		}
-		redacted, _ := l.piiEngine.RedactRequestBodyForLogging(reqEndpoint, []byte(entry.Body.RequestBody))
-		entry.Body.RequestBody = json.RawMessage(redacted)
+		redacted, ok := l.piiEngine.RedactRequestBodyForLogging(reqEndpoint, []byte(entry.Body.RequestBody))
+		if ok {
+			entry.Body.RequestBody = json.RawMessage(redacted)
+		} else if l.piiEngine.Registry().IsFullBodyPII(classifiedPath) {
+			// Fail-closed unknown path: RequestBodyPattern returned the raw
+			// (unclassified) path, which has no rules registered, so the
+			// engine returned (body, false). Mirror the response-side
+			// behavior and fall back to the full-body placeholder so the
+			// PIIRedactedRequest=true flag accurately reflects what's on
+			// disk. The engine docstring documents this caller contract.
+			entry.Body.RequestBody = json.RawMessage(l.piiEngine.RedactFullBody(reqEndpoint))
+		}
+		// else: rule lookup found rules but none matched the body fields
+		// (e.g. caller sent a partial schema); leave the body as-is. This
+		// is the same behavior RedactForLogging exhibits on the response
+		// side when no rule matched the actual JSON.
 	}
 }

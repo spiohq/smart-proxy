@@ -387,7 +387,7 @@ func TestLoggingMiddleware_QueryParamsRedacted_CustomExtras(t *testing.T) {
 }
 
 func TestLoggingMiddleware_PostMessagingRequestBodyRedacted(t *testing.T) {
-	logger, _, bs := setupTestLogger(t)
+	logger, ms, bs := setupTestLogger(t)
 	registry := pii.NewRegistry()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -417,13 +417,22 @@ func TestLoggingMiddleware_PostMessagingRequestBodyRedacted(t *testing.T) {
 		"messaging request body must be redacted before persistence (F-02)")
 	assert.NotContains(t, string(allBodies[0].RequestBody), "Hauptstrasse")
 	assert.Contains(t, string(allBodies[0].RequestBody), "REDACTED")
+
+	// Metadata flag assertion: PIIRedactedRequest must be true so downstream
+	// consumers (F-15 read-side filter, audit, dashboard) can rely on it.
+	allMeta := ms.allEntries()
+	require.Len(t, allMeta, 1)
+	assert.True(t, allMeta[0].PIIRedactedRequest,
+		"messaging POST must set PIIRedactedRequest=true in metadata")
+	assert.False(t, allMeta[0].PIIRedactedResponse,
+		"messaging POST does not redact response (no full-body GET match)")
 }
 
 func TestLoggingMiddleware_PostFeedsRequestBodyNotRedacted(t *testing.T) {
 	// Off-schema endpoint: even if the caller stuffs PII into a feed body,
 	// the proxy is not in the business of heuristic redaction; the body
 	// is persisted as-is. This is the explicit scope boundary in the spec.
-	logger, _, bs := setupTestLogger(t)
+	logger, ms, bs := setupTestLogger(t)
 	registry := pii.NewRegistry()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -446,6 +455,13 @@ func TestLoggingMiddleware_PostFeedsRequestBodyNotRedacted(t *testing.T) {
 	require.Len(t, allBodies, 1)
 	// Body present verbatim. (Garbage-in is caller responsibility.)
 	assert.Contains(t, string(allBodies[0].RequestBody), "POST_PRODUCT_DATA")
+
+	// Metadata flag must be false: nothing was redacted, and downstream
+	// consumers must not be misled into thinking the body is sanitized.
+	allMeta := ms.allEntries()
+	require.Len(t, allMeta, 1)
+	assert.False(t, allMeta[0].PIIRedactedRequest,
+		"off-schema POST must NOT set PIIRedactedRequest")
 }
 
 func TestLoggingMiddleware_PostMfnRequestBody_OnlyShipFromAddressRedacted(t *testing.T) {
@@ -453,7 +469,7 @@ func TestLoggingMiddleware_PostMfnRequestBody_OnlyShipFromAddressRedacted(t *tes
 	// holds the buyer's address in the return-shipment use case. Buyer
 	// fields must be redacted; the AmazonOrderId stays untouched (Order IDs
 	// are not direct PII per Amazon's DPP definition).
-	logger, _, bs := setupTestLogger(t)
+	logger, ms, bs := setupTestLogger(t)
 	registry := pii.NewRegistry()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -490,4 +506,62 @@ func TestLoggingMiddleware_PostMfnRequestBody_OnlyShipFromAddressRedacted(t *tes
 	assert.NotContains(t, rb, "7132341234")
 	assert.NotContains(t, rb, "300 Turnbull Ave")
 	assert.Contains(t, rb, "903-3489051-5871062", "Amazon Order IDs are not direct PII; must remain")
+
+	allMeta := ms.allEntries()
+	require.Len(t, allMeta, 1)
+	assert.True(t, allMeta[0].PIIRedactedRequest,
+		"MFN POST must set PIIRedactedRequest=true in metadata")
+}
+
+func TestLoggingMiddleware_FailClosed_UnknownPostBody_FallsBackToFullBodyPlaceholder(t *testing.T) {
+	// Reviewer-flagged Critical: in fail-closed mode, a POST to an
+	// unrecognized SP-API path triggers RequestBodyContainsPII=true with
+	// RequestBodyPattern returning the raw (unclassified) path. That path
+	// has no rules registered, so the engine returns (body, false). Without
+	// a full-body fallback, PIIRedactedRequest=true would be set on
+	// metadata while the body lands on disk verbatim -- contradicting the
+	// metadata flag and defeating fail-closed mode.
+	//
+	// Important: this test cannot reuse setupTestLogger because that helper
+	// builds the AsyncLogger with a separate non-fail-closed Registry. In
+	// production main.go shares a single Registry between the middleware
+	// and the engine; we mirror that wiring here so the engine-side
+	// IsFullBodyPII check sees the fail-closed flag.
+	registry := pii.NewRegistryWithExtras(nil)
+	registry.SetFailClosed(true)
+
+	ms := &mockStore{}
+	bs := &mockBodyStore{}
+	logger := NewAsyncLogger(ms, bs, pii.NewEngine(registry), 100)
+	t.Cleanup(func() { logger.Close() })
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusOK)
+	})
+	mw := LoggingMiddleware(logger, registry, "eu", 0)(handler)
+
+	body := `{"someField":"victim@example.com","other":"sensitive data"}`
+	req := httptest.NewRequest("POST", "/futureapi/2030-01-01/unknown-action", strings.NewReader(body))
+	req.ContentLength = int64(len(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withMerchant(req, "merchant-a")
+
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+	logger.Close()
+
+	allBodies := bs.allEntries()
+	require.Len(t, allBodies, 1)
+	rb := string(allBodies[0].RequestBody)
+	assert.NotContains(t, rb, "victim@example.com",
+		"fail-closed unknown POST must redact body to placeholder")
+	assert.NotContains(t, rb, "sensitive data")
+	assert.Contains(t, rb, "redacted",
+		"fail-closed fallback uses RedactFullBody, which produces a placeholder document")
+
+	allMeta := ms.allEntries()
+	require.Len(t, allMeta, 1)
+	assert.True(t, allMeta[0].PIIRedactedRequest,
+		"fail-closed unknown POST must set PIIRedactedRequest=true and the body must reflect that")
 }
