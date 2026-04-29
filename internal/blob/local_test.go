@@ -156,3 +156,56 @@ func TestLocalBackend_PutWritesAt0o600(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
+
+// ── Symlink-safe path resolution (F-24) ──────────────────────────────────
+
+func TestLocalBackend_RejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+
+	// Plant a symlink inside root that points outside.
+	require.NoError(t, os.Symlink(outside, filepath.Join(root, "escape")))
+
+	b, err := NewLocal(root)
+	require.NoError(t, err)
+
+	// Get through the symlink: the resolved target lives outside the
+	// canonicalized backend root, so pathFor must refuse.
+	_, err = b.Get(context.Background(), "escape/anyfile", 0, 0)
+	require.Error(t, err, "Get of a key that traverses an out-of-root symlink must fail")
+	assert.Contains(t, err.Error(), "invalid key")
+
+	// Same protection applies to Put -- Put would have written into the
+	// outside directory, which is exactly the harm.
+	err = b.Put(context.Background(), "escape/newfile", strings.NewReader("x"), 1)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid key")
+}
+
+func TestLocalBackend_AllowsSymlinkInsideRoot(t *testing.T) {
+	// A symlink that targets another path INSIDE the backend root must
+	// still work. Otherwise legitimate operator setups (e.g. /data/bodies
+	// is a symlink to /var/lib/proxy/bodies that resolves to a path also
+	// owned by the proxy) would break.
+	root := t.TempDir()
+	inside := filepath.Join(root, "real")
+	require.NoError(t, os.MkdirAll(inside, 0o700))
+	require.NoError(t, os.Symlink(inside, filepath.Join(root, "alias")))
+
+	// Plant a real file under "real/" via the OS (NewLocal canonicalizes
+	// root to the resolved path of root, so an alias inside the original
+	// root is still inside the canonicalized root because both target the
+	// same filesystem).
+	require.NoError(t, os.WriteFile(filepath.Join(inside, "f"), []byte("hello"), 0o600))
+
+	b, err := NewLocal(root)
+	require.NoError(t, err)
+
+	rc, err := b.Get(context.Background(), "alias/f", 0, 0)
+	require.NoError(t, err, "in-root symlink must resolve cleanly")
+	defer rc.Close()
+	got := make([]byte, 5)
+	n, err := rc.Read(got)
+	require.NoError(t, err)
+	assert.Equal(t, "hello", string(got[:n]))
+}

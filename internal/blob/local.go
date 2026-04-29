@@ -18,19 +18,63 @@ type LocalBackend struct {
 }
 
 // NewLocal creates a local filesystem backend rooted at root. The directory
-// is created if missing.
+// is created if missing. The root is canonicalized (absolute + symlinks
+// resolved) so pathFor's containment check works against a stable prefix.
 func NewLocal(root string) (*LocalBackend, error) {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, fmt.Errorf("create blob root %s: %w", root, err)
 	}
-	return &LocalBackend{root: root}, nil
+	// Canonicalize for the symlink-containment check below (F-24).
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return nil, fmt.Errorf("resolve blob root %s: %w", root, err)
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	return &LocalBackend{root: abs}, nil
 }
 
+// pathFor maps a logical key to an absolute filesystem path under the
+// backend root. It rejects literal '..' segments and -- for the F-24
+// symlink-containment property -- ensures that the resolved path stays
+// inside the canonicalized root even when intermediate path components
+// are symlinks. Non-existent path segments are tolerated (the file may
+// not exist yet); only the existing prefix is resolved and validated.
+//
+// Pentest finding F-24.
 func (b *LocalBackend) pathFor(key string) (string, error) {
 	if key == "" || strings.Contains(key, "..") {
 		return "", fmt.Errorf("invalid key %q", key)
 	}
-	return filepath.Join(b.root, filepath.FromSlash(key)), nil
+	joined := filepath.Join(b.root, filepath.FromSlash(key))
+
+	// Walk up the path until we find a portion that exists, then check
+	// that EvalSymlinks of that portion still lives under b.root. We do
+	// not require the full target to exist (Put creates new files) -- we
+	// only need to refuse paths whose existing prefix has been redirected
+	// out of the backend root via a symlink.
+	check := joined
+	for {
+		resolved, err := filepath.EvalSymlinks(check)
+		if err == nil {
+			rootPrefix := b.root + string(filepath.Separator)
+			if !strings.HasPrefix(resolved+string(filepath.Separator), rootPrefix) && resolved != b.root {
+				return "", fmt.Errorf("invalid key %q (resolves outside blob root)", key)
+			}
+			break
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("resolve %q: %w", key, err)
+		}
+		next := filepath.Dir(check)
+		if next == check {
+			// Reached filesystem root without finding any existing path.
+			break
+		}
+		check = next
+	}
+	return joined, nil
 }
 
 func (b *LocalBackend) Put(ctx context.Context, key string, r io.Reader, _ int64) error {
