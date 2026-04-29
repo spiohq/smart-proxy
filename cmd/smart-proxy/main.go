@@ -189,7 +189,13 @@ func main() {
 	dashHandler := dashboard.NewHandlerWithPII(metaStore, auditStore, bodyStore, piiEngine)
 	dashMux := dashboard.NewMux(dashHandler)
 
-	// Mount /metrics on dashboard mux (or separate port)
+	// Mount /metrics on dashboard mux (or separate port).
+	// /metrics is mounted on the bare mux BEFORE the security-headers
+	// wrapping (F-03) so Prometheus scrapes don't pay the CSP/cache-control
+	// overhead. The security headers are harmless to scrapers, but adding
+	// them to a metrics endpoint would mislead anyone debugging the headers
+	// later about which endpoints are part of the dashboard vs the
+	// observability surface.
 	if cfg.Prometheus.Enabled {
 		if cfg.Prometheus.Port == 0 {
 			// Serve on dashboard port
@@ -246,7 +252,11 @@ func main() {
 		return proxy.BuildChain(rp, middlewares...)
 	}
 
-	srv, err := server.New(cfg, factory, dashMux)
+	// Wrap the dashboard mux with the security-headers middleware (F-03)
+	// before handing it to the server. /metrics was already attached above
+	// and inherits the headers harmlessly.
+	dashRoot := dashboard.SecurityHeadersMiddleware(dashMux)
+	srv, err := server.New(cfg, factory, dashRoot)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
 		os.Exit(1)
