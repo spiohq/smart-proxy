@@ -633,9 +633,9 @@ func TestRequestBodyRulesFor_ShippingV1_BothDirections(t *testing.T) {
 		paths = append(paths, r.JSONPath)
 	}
 	assert.Contains(t, paths, "$.shipTo.name")
-	assert.Contains(t, paths, "$.shipTo.copyEmails[*]")
+	assert.Contains(t, paths, "$.shipTo.copyEmails")
 	assert.Contains(t, paths, "$.shipFrom.name")
-	assert.Contains(t, paths, "$.shipFrom.copyEmails[*]")
+	assert.Contains(t, paths, "$.shipFrom.copyEmails")
 }
 
 func TestRequestBodyRulesFor_ShippingV2_ThreeEndpointsShareRules(t *testing.T) {

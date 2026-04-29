@@ -253,6 +253,10 @@ var DefaultRequestBodyPIIRules = map[string][]FieldRedaction{
 	// Shipping v1 purchaseShipment / createShipment. Schema verified
 	// against shipping.json: top-level shipTo AND shipFrom both carry
 	// PII; copyEmails is an array of additional notification addresses.
+	// We redact the whole copyEmails array as one value rather than each
+	// element -- the JSONPath walker only edits parent map entries, and
+	// "redact the array" is just as DPP-conformant as "redact each
+	// element". Caller sees "[REDACTED]" instead of an array.
 	"/shipping/v1/shipments": {
 		{JSONPath: "$.shipTo.name", Mode: RedactModeRedact},
 		{JSONPath: "$.shipTo.addressLine1", Mode: RedactModeRedact},
@@ -263,7 +267,7 @@ var DefaultRequestBodyPIIRules = map[string][]FieldRedaction{
 		{JSONPath: "$.shipTo.postalCode", Mode: RedactModeRedact},
 		{JSONPath: "$.shipTo.phoneNumber", Mode: RedactModeRedact},
 		{JSONPath: "$.shipTo.email", Mode: RedactModeRedact},
-		{JSONPath: "$.shipTo.copyEmails[*]", Mode: RedactModeRedact},
+		{JSONPath: "$.shipTo.copyEmails", Mode: RedactModeRedact},
 		{JSONPath: "$.shipFrom.name", Mode: RedactModeRedact},
 		{JSONPath: "$.shipFrom.addressLine1", Mode: RedactModeRedact},
 		{JSONPath: "$.shipFrom.addressLine2", Mode: RedactModeRedact},
@@ -273,7 +277,7 @@ var DefaultRequestBodyPIIRules = map[string][]FieldRedaction{
 		{JSONPath: "$.shipFrom.postalCode", Mode: RedactModeRedact},
 		{JSONPath: "$.shipFrom.phoneNumber", Mode: RedactModeRedact},
 		{JSONPath: "$.shipFrom.email", Mode: RedactModeRedact},
-		{JSONPath: "$.shipFrom.copyEmails[*]", Mode: RedactModeRedact},
+		{JSONPath: "$.shipFrom.copyEmails", Mode: RedactModeRedact},
 	},
 
 	// Shipping v2: there is NO top-level POST at /shipping/v2/shipments.

@@ -66,6 +66,65 @@ func (e *Engine) RedactForLogging(endpoint string, body []byte) ([]byte, bool) {
 	return redacted, true
 }
 
+// RedactRequestBodyForLogging applies request-body PII rules to the body of
+// a non-GET request. Returns (redacted copy, true) if any rules matched, or
+// (original body, false) if no rules matched, the body is not valid JSON,
+// or the endpoint pattern has no request-body rules.
+//
+// The "$" JSONPath is treated specially: it means "the entire body is PII"
+// and the function returns a placeholder document. This is the same
+// convention RedactFullBody uses on the response side. RequestBodyPattern's
+// fail-closed branch returns a raw (unclassified) path; callers that route
+// fail-closed traffic through here will hit the no-rules return and should
+// fall back to RedactFullBody themselves.
+func (e *Engine) RedactRequestBodyForLogging(endpoint string, body []byte) ([]byte, bool) {
+	rules := e.registry.RequestBodyRulesFor(endpoint)
+	if len(rules) == 0 {
+		return body, false
+	}
+
+	// Full-body sentinel: any rule with JSONPath "$" replaces everything.
+	for _, rule := range rules {
+		if rule.JSONPath == "$" {
+			return e.RedactFullBody(endpoint), true
+		}
+	}
+
+	var data interface{}
+	if err := json.Unmarshal(body, &data); err != nil {
+		return body, false
+	}
+
+	anyMatched := false
+	for _, rule := range rules {
+		mode := rule.Mode
+		matched := WalkAndApply(data, rule.JSONPath, func(parent map[string]interface{}, key string) bool {
+			switch mode {
+			case RedactModeRedact:
+				parent[key] = "[REDACTED]"
+			case RedactModeHash:
+				parent[key] = hashValue(parent[key])
+			case RedactModeOmit:
+				delete(parent, key)
+			}
+			return true
+		})
+		if matched {
+			anyMatched = true
+		}
+	}
+
+	if !anyMatched {
+		return body, false
+	}
+
+	redacted, err := json.Marshal(data)
+	if err != nil {
+		return body, false
+	}
+	return redacted, true
+}
+
 // RedactFullBody returns a placeholder JSON object for full-body PII endpoints.
 // The returned bytes represent: {"redacted": true, "endpoint": "<pattern>"}
 func (e *Engine) RedactFullBody(endpoint string) []byte {
