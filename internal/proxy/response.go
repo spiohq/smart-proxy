@@ -35,9 +35,41 @@ func newResponseModifierWithLimiter(limiter *ratelimit.Limiter) func(*http.Respo
 	}
 }
 
+// internalErrorReasonKey is a context key carrying the rich internal
+// upstream-error classification from newErrorHandler to the logging
+// middleware (which stores it in meta.ErrorReason). The public response
+// header X-SP-Proxy-Error-Reason is intentionally coarse (F-16); using
+// a context value keeps the rich taxonomy in operator logs without
+// leaking it to callers.
+type internalErrorReasonKey struct{}
+
+// SetInternalErrorReason stashes the rich classification on a request
+// context. Used by the logging middleware to read what the proxy's
+// error handler actually saw.
+func SetInternalErrorReason(r *http.Request, reason string) {
+	if r == nil {
+		return
+	}
+	if slot, ok := r.Context().Value(internalErrorReasonKey{}).(*string); ok {
+		*slot = reason
+	}
+}
+
+// PrepareInternalErrorReason returns a request whose context carries a
+// writable string slot for the upstream error reason. The logging
+// middleware calls this BEFORE invoking the proxy so the error handler
+// (deeper in the chain) can record into the same slot. Returns the
+// updated request and a getter that reads the current slot value.
+func PrepareInternalErrorReason(r *http.Request) (*http.Request, func() string) {
+	slot := new(string)
+	ctx := context.WithValue(r.Context(), internalErrorReasonKey{}, slot)
+	return r.WithContext(ctx), func() string { return *slot }
+}
+
 func newErrorHandler() func(http.ResponseWriter, *http.Request, error) {
 	return func(w http.ResponseWriter, r *http.Request, err error) {
 		reason := classifyUpstreamError(err)
+		external := externalReason(reason)
 
 		slog.Error("upstream request failed",
 			"method", r.Method,
@@ -47,13 +79,34 @@ func newErrorHandler() func(http.ResponseWriter, *http.Request, error) {
 			"merchant", r.Header.Get("X-SP-Proxy-Merchant-Key"),
 		)
 
+		// Stash the rich internal reason on the request context so the
+		// logging middleware (outer wrapper) can pick it up. The public
+		// response header gets the coarse external value only (F-16).
+		SetInternalErrorReason(r, reason)
+
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("X-SP-Proxy-Error-Reason", reason)
+		w.Header().Set("X-SP-Proxy-Error-Reason", external)
 		w.WriteHeader(http.StatusBadGateway)
 		w.Write([]byte(fmt.Sprintf(
 			`{"errors":[{"code":"PROXY_ERROR","message":"upstream unavailable","detail":"%s"}]}`,
-			reason,
+			external,
 		)))
+	}
+}
+
+// externalReason maps the rich internal classification to a small whitelist
+// of values safe to expose to the caller. The internal taxonomy stays in
+// logs and the meta.ErrorReason DB column; the external set is
+// intentionally coarse so it cannot be used for reconnaissance about the
+// operator's network.
+//
+// Pentest finding F-16.
+func externalReason(internal string) string {
+	switch internal {
+	case "upstream_timeout", "client_disconnected", "client_disconnected_in_queue":
+		return internal
+	default:
+		return "upstream_error"
 	}
 }
 

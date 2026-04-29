@@ -14,6 +14,7 @@ import (
 	"github.com/spiohq/smart-proxy/internal/cache"
 	"github.com/spiohq/smart-proxy/internal/merchant"
 	"github.com/spiohq/smart-proxy/internal/pii"
+	"github.com/spiohq/smart-proxy/internal/proxy"
 	"github.com/spiohq/smart-proxy/internal/storage"
 )
 
@@ -39,6 +40,12 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 			requestID := GenerateRequestID()
 			ctx := cache.ContextWithRequestID(r.Context(), requestID)
 			r = r.WithContext(ctx)
+
+			// Prepare a context slot for the rich internal upstream-error
+			// classification (F-16). The proxy's ErrorHandler writes into
+			// this slot; the public X-SP-Proxy-Error-Reason header carries
+			// only the coarse externally-safe value.
+			r, getInternalErrorReason := proxy.PrepareInternalErrorReason(r)
 
 			// Wrap response writer to capture status + body
 			capture := NewResponseCapture(w, int(maxCaptureSize))
@@ -104,8 +111,16 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 				}
 			}
 
-			// Error reason (set by proxy ErrorHandler for 502s)
-			if reason := capture.Header().Get("X-SP-Proxy-Error-Reason"); reason != "" {
+			// Error reason (set by proxy ErrorHandler for 502s).
+			// F-16: store the rich internal classification from the
+			// context slot (not exposed to the caller); fall back to the
+			// coarse public header for paths that don't go through the
+			// upstream ErrorHandler (e.g. rate-limit's
+			// "client_disconnected_in_queue", which is set directly on
+			// the response header by the rate-limit middleware).
+			if reason := getInternalErrorReason(); reason != "" {
+				meta.ErrorReason = reason
+			} else if reason := capture.Header().Get("X-SP-Proxy-Error-Reason"); reason != "" {
 				meta.ErrorReason = reason
 			}
 
