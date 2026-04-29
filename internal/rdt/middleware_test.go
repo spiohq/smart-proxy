@@ -731,3 +731,56 @@ func TestMiddleware_SecondRequest_UsesCachedRDT(t *testing.T) {
 	_ = rr1
 	_ = rr2
 }
+
+// ── Singleflight key includes token hash (F-13) ───────────────────────────
+
+func TestMiddleware_Singleflight_DifferentTokens_SameMerchant_MintIndependently(t *testing.T) {
+	// Pentest finding F-13: two concurrent callers with the same merchant
+	// header but DIFFERENT LWA tokens must NOT share a mint -- otherwise
+	// caller A's seller-context RDT could be handed to spoofer B (token
+	// confusion across the merchant-id boundary). Verify that the
+	// singleflight key includes a token-hash component so the two mints
+	// fan out independently.
+	var mintCalls atomic.Int32
+
+	mw, cleanup := newTestMiddleware(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mintCalls.Add(1)
+		// Slow the upstream a little so the two requests overlap and the
+		// singleflight slot is contended.
+		time.Sleep(50 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		// Tag the RDT with the calling LWA token so we can verify each
+		// caller got its OWN mint, not a shared result.
+		json.NewEncoder(w).Encode(CreateRDTResponse{
+			RestrictedDataToken: "Atz.sprdt|for:" + r.Header.Get("x-amz-access-token"),
+			ExpiresIn:           3600,
+		})
+	}))
+	defer cleanup()
+
+	backend := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := wrapWithMerchant("merchant-shared", mw.Handler(backend))
+
+	var wg sync.WaitGroup
+	for _, tok := range []string{"Atza|alpha", "Atza|bravo"} {
+		wg.Add(1)
+		go func(token string) {
+			defer wg.Done()
+			req := httptest.NewRequest("GET",
+				"/orders/v0/orders/123-4567890-1234567/buyerInfo", nil)
+			req.Header.Set("x-amz-access-token", token)
+			ctx := merchant.ContextWithMerchant(req.Context(), merchant.ResolvedMerchant{
+				Key: "merchant-shared", Source: "header",
+			})
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req.WithContext(ctx))
+		}(tok)
+	}
+	wg.Wait()
+
+	assert.Equal(t, int32(2), mintCalls.Load(),
+		"different LWA tokens for the same merchant must mint independently (F-13)")
+}

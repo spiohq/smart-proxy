@@ -2,6 +2,8 @@ package rdt
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -122,8 +124,19 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 			}
 		}
 
-		// Cache miss: mint a new RDT (with singleflight deduplication)
-		sfKey := cacheKey.MerchantID + "|" + cacheKey.GenericPath + "|" + cacheKey.DataElements
+		// Cache miss: mint a new RDT (with singleflight deduplication).
+		// Include a token-hash component so two concurrent callers with the
+		// same merchant header but DIFFERENT LWA tokens mint independently.
+		// Without this, the first caller's mint fan-out would hand the
+		// resulting RDT (which Amazon issued against the FIRST caller's
+		// seller-context) to the second caller. In a breached merchant-id
+		// boundary (F-04 collisions or deliberate spoofing) this becomes a
+		// cross-tenant token-confusion path: spoofer B receives an RDT
+		// scoped to seller A's data and Amazon accepts it.
+		// Pentest finding F-13.
+		tokenHash := sha256.Sum256([]byte(token))
+		sfKey := cacheKey.MerchantID + "|" + cacheKey.GenericPath + "|" + cacheKey.DataElements +
+			"|" + hex.EncodeToString(tokenHash[:8])
 		result, _, _ := m.group.Do(sfKey, func() (any, error) {
 			// Double-check cache after acquiring singleflight slot
 			if op.Cacheable {
