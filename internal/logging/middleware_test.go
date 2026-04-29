@@ -2,6 +2,7 @@ package logging
 
 import (
 	"bytes"
+	"compress/gzip"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -564,4 +565,55 @@ func TestLoggingMiddleware_FailClosed_UnknownPostBody_FallsBackToFullBodyPlaceho
 	require.Len(t, allMeta, 1)
 	assert.True(t, allMeta[0].PIIRedactedRequest,
 		"fail-closed unknown POST must set PIIRedactedRequest=true and the body must reflect that")
+}
+
+// ── decompressIfGzipBounded (F-09) ────────────────────────────────────────
+
+func TestDecompressIfGzipBounded_BombDefenseFallsBackToCompressed(t *testing.T) {
+	// A 1 KiB cap, fed a gzip stream that decompresses to 10x the cap.
+	// The function must NOT return the bomb's expanded contents; it falls
+	// back to the original compressed bytes.
+	const cap = 1024
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	_, _ = gw.Write(bytes.Repeat([]byte{'A'}, 10*cap))
+	_ = gw.Close()
+	compressed := buf.Bytes()
+
+	headers := http.Header{}
+	headers.Set("Content-Encoding", "gzip")
+
+	got := decompressIfGzipBounded(compressed, headers, cap)
+	assert.Equal(t, compressed, got,
+		"on overflow, fall back to compressed bytes rather than partially decompressed output")
+}
+
+func TestDecompressIfGzipBounded_NormalGzipWithinCap(t *testing.T) {
+	// Sanity check: when the decompressed output fits, it is returned
+	// fully. This ensures the bomb defense does not break normal traffic.
+	const cap = 4096
+	payload := []byte(`{"data":"hello"}`)
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	_, _ = gw.Write(payload)
+	_ = gw.Close()
+
+	headers := http.Header{}
+	headers.Set("Content-Encoding", "gzip")
+
+	got := decompressIfGzipBounded(buf.Bytes(), headers, cap)
+	assert.Equal(t, payload, got)
+}
+
+func TestDecompressIfGzip_NotGzip_PassesThrough(t *testing.T) {
+	// Pre-existing behavior preserved: non-gzip body is returned untouched.
+	headers := http.Header{}
+	body := []byte(`{"plain":"json"}`)
+	assert.Equal(t, body, decompressIfGzip(body, headers))
+}
+
+func TestDecompressIfGzip_EmptyBody_ReturnsEmpty(t *testing.T) {
+	headers := http.Header{}
+	headers.Set("Content-Encoding", "gzip")
+	assert.Empty(t, decompressIfGzip(nil, headers))
 }

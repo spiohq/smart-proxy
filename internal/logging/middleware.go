@@ -123,7 +123,7 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 					ResponseHeaders: respHeaders,
 				}
 			} else {
-				responseBody := decompressIfGzip(capture.CapturedBody(), capture.Header())
+				responseBody := decompressIfGzipBounded(capture.CapturedBody(), capture.Header(), 4*maxCaptureSize)
 				bodyEntry := &bodies.BodyEntry{
 					ID:              requestID,
 					RequestHeaders:  reqHeaders,
@@ -152,10 +152,23 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 	}
 }
 
-// decompressIfGzip decompresses gzip-encoded body bytes for logging.
-// When the client sends Accept-Encoding: gzip, Go's ReverseProxy passes
-// compressed bytes through without decoding. We need the raw JSON for storage.
+// decompressIfGzip decompresses gzip-encoded body bytes for logging using
+// the default decompression cap of 4 * DefaultMaxCaptureSize. When the client
+// sends Accept-Encoding: gzip, Go's ReverseProxy passes compressed bytes
+// through without decoding -- we need the raw JSON for storage.
 func decompressIfGzip(data []byte, header http.Header) []byte {
+	return decompressIfGzipBounded(data, header, 4*int64(DefaultMaxCaptureSize))
+}
+
+// decompressIfGzipBounded is like decompressIfGzip but caps the decompressed
+// output at maxOut bytes. This defends against gzip-bomb amplification: a
+// 256 KiB highly-compressed payload can otherwise expand into hundreds of MB
+// in process memory. On overflow the function returns the original
+// (compressed) bytes -- the redaction engine will detect non-JSON content
+// downstream and skip its rule walk, which is the correct fail-soft choice.
+//
+// Pentest finding F-09.
+func decompressIfGzipBounded(data []byte, header http.Header, maxOut int64) []byte {
 	if len(data) == 0 {
 		return data
 	}
@@ -167,8 +180,16 @@ func decompressIfGzip(data []byte, header http.Header) []byte {
 		return data
 	}
 	defer gr.Close()
-	decoded, err := io.ReadAll(gr)
+	// io.LimitReader caps the decompressed read at maxOut+1 to detect
+	// overflow: if we read maxOut+1 bytes, the input would have produced
+	// more, so we treat that as a bomb and fall back to the compressed
+	// bytes rather than partially decoded data.
+	limited := io.LimitReader(gr, maxOut+1)
+	decoded, err := io.ReadAll(limited)
 	if err != nil {
+		return data
+	}
+	if int64(len(decoded)) > maxOut {
 		return data
 	}
 	return decoded
