@@ -7,5 +7,5 @@ ALTER TABLE request_logs ADD COLUMN pii_redacted_response BOOLEAN DEFAULT FALSE;
 UPDATE request_logs SET pii_redacted_response = pii_redacted WHERE pii_redacted = TRUE;
 
 -- Note: keep pii_redacted (the legacy column) for one release for
--- read-side compatibility with rolled-back binaries; a follow-up
--- migration would drop it once the dual-write window closes.
+-- read-side compatibility with rolled-back binaries; migration 008
+-- (deferred) drops it once the dual-write window closes.

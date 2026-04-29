@@ -138,6 +138,12 @@ func (l *AsyncLogger) redactBody(entry *LogEntry) {
 
 	classifiedPath := endpoint.Classify(entry.Meta.Path)
 
+	// TODO(Task 9 / F-02): split this body by direction. As written, the
+	// IsFullBodyPII early return below covers only the response side --
+	// once Task 9 sets PIIRedactedRequest=true on POST traffic, the
+	// request body must be processed too, separately from the response
+	// branch. The plan's Task 9 Step 4 has the target shape.
+
 	// Full-body PII endpoint  -  replace entire body with placeholder
 	if l.piiEngine.Registry().IsFullBodyPII(classifiedPath) {
 		entry.Body.ResponseBody = json.RawMessage(l.piiEngine.RedactFullBody(classifiedPath))
