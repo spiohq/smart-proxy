@@ -144,31 +144,52 @@ func RateLimitMiddleware(limiter *Limiter, cfg *config.RateLimitConfig) func(htt
 	}
 }
 
-// resolveThrottleMode uses 4-tier resolution: header > per-merchant > per-endpoint > global.
+// resolveThrottleMode resolves the throttle mode for a request. The header
+// X-SP-Proxy-Throttle-Mode is advisory: it can shorten the wait or downgrade
+// to "reject" (caller wants to fail fast), but it cannot upgrade to a more
+// permissive mode than what the operator configured. Operator-chosen
+// "reject" is treated as a ceiling that the header cannot break through.
+//
+// Resolution order: header > per-merchant > per-endpoint > global default.
+//
+// Pentest finding F-11.
 func resolveThrottleMode(r *http.Request, merchantKey, endpoint string, cfg *config.RateLimitConfig) ThrottleMode {
-	if header := r.Header.Get("X-SP-Proxy-Throttle-Mode"); header != "" {
-		if m := parseThrottleMode(header); m != "" {
-			return m
-		}
-	}
+	// Resolve the operator-chosen mode (the ceiling).
+	operatorMode := ThrottleModeQueue
 	if cfg.MerchantModes != nil {
 		if mode, ok := cfg.MerchantModes[merchantKey]; ok {
 			if m := parseThrottleMode(mode); m != "" {
-				return m
+				operatorMode = m
 			}
 		}
 	}
 	if cfg.EndpointModes != nil {
 		if mode, ok := cfg.EndpointModes[endpoint]; ok {
 			if m := parseThrottleMode(mode); m != "" {
-				return m
+				operatorMode = m
 			}
 		}
 	}
-	if m := parseThrottleMode(cfg.DefaultMode); m != "" {
-		return m
+	// Only fall through to default when no per-merchant or per-endpoint
+	// override applies.
+	if operatorMode == ThrottleModeQueue {
+		if m := parseThrottleMode(cfg.DefaultMode); m != "" {
+			operatorMode = m
+		}
 	}
-	return ThrottleModeQueue
+
+	// Header is advisory. It may downgrade (queue -> reject) but not
+	// upgrade (reject -> queue): the operator's "fail fast" choice is a
+	// ceiling, not a floor.
+	if header := r.Header.Get("X-SP-Proxy-Throttle-Mode"); header != "" {
+		if requested := parseThrottleMode(header); requested != "" {
+			if operatorMode == ThrottleModeReject && requested != ThrottleModeReject {
+				return ThrottleModeReject
+			}
+			return requested
+		}
+	}
+	return operatorMode
 }
 
 func parseThrottleMode(s string) ThrottleMode {
@@ -187,17 +208,29 @@ func parseThrottleMode(s string) ThrottleMode {
 	}
 }
 
+// resolveTimeout returns the queue-timeout duration. Like resolveThrottleMode,
+// the X-SP-Proxy-Throttle-Mode header is advisory: a "queue-timeout:<N>ms"
+// suffix can SHORTEN the wait but cannot LENGTHEN it beyond cfg.QueueTimeout
+// (the operator's ceiling). Clients that want to fail faster can; clients
+// that want to wait longer than the operator allowed cannot.
+//
+// Pentest finding F-11.
 func resolveTimeout(r *http.Request, cfg *config.RateLimitConfig) time.Duration {
+	cfgMax, _ := time.ParseDuration(cfg.QueueTimeout)
+	if cfgMax <= 0 {
+		cfgMax = 1 * time.Second
+	}
+
 	if header := r.Header.Get("X-SP-Proxy-Throttle-Mode"); header != "" {
 		parts := strings.SplitN(header, ":", 2)
 		if len(parts) == 2 {
-			if d, err := time.ParseDuration(parts[1] + "ms"); err == nil {
+			if d, err := time.ParseDuration(parts[1] + "ms"); err == nil && d > 0 {
+				if d > cfgMax {
+					return cfgMax
+				}
 				return d
 			}
 		}
 	}
-	if d, err := time.ParseDuration(cfg.QueueTimeout); err == nil {
-		return d
-	}
-	return 1 * time.Second
+	return cfgMax
 }
