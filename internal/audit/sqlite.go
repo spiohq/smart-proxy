@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -90,7 +91,18 @@ func (s *SQLiteStore) QueryAuditEvents(ctx context.Context, filter AuditFilter) 
 			return nil, 0, fmt.Errorf("audit scan: %w", err)
 		}
 		if metadata.Valid && metadata.String != "" {
-			json.Unmarshal([]byte(metadata.String), &e.Metadata)
+			// Surface unmarshal failures rather than silently returning
+			// an audit row with nil Metadata (F-19). The audit-log
+			// integrity story matters in a DPP audit; silent failures
+			// undermine it. Continue with nil metadata so the rest of
+			// the row is still visible to operators.
+			if err := json.Unmarshal([]byte(metadata.String), &e.Metadata); err != nil {
+				slog.Warn("audit metadata unmarshal failed",
+					"id", e.ID,
+					"event_type", e.EventType,
+					"error", err,
+					"raw_len", len(metadata.String))
+			}
 		}
 		result = append(result, e)
 	}
