@@ -45,3 +45,11 @@ internal/dashboard/static/
 # Cache
 .gocache
 .gomodcache
+
+# Config / secrets (F-22)
+# Catch-all for env files anywhere in the tree -- a developer who copies
+# deploy/example.env to deploy/.env, web/.env, or config.env will have
+# the copy ignored. The canonical example file is the only allowlisted
+# entry; if you add another committed example, allowlist it here too.
+**/*.env
+!deploy/example.env
