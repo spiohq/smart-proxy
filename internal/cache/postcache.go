@@ -88,7 +88,7 @@ func handlePostCache(
 
 	// Cache 2xx responses
 	if rec.statusCode >= 200 && rec.statusCode < 300 {
-		ttl := resolveTTL(r, tier)
+		ttl := resolveTTL(r, tier, cfg)
 		resp := &CachedResponse{
 			StatusCode:      rec.statusCode,
 			Headers:         rec.headers.Clone(),

@@ -24,10 +24,11 @@ type RateLimitConfig struct {
 
 // CacheConfig holds caching settings.
 type CacheConfig struct {
-	Enabled    bool
-	MaxMemory  int64  // bytes, default 256 MB
-	DefaultTTL string // duration string, e.g. "60s"
-	ExcludePII bool   // when true, PII checker can skip caching
+	Enabled      bool
+	MaxMemory    int64  // bytes, default 256 MB
+	DefaultTTL   string // duration string, e.g. "60s"
+	MaxClientTTL string // duration string; clamps client-supplied X-SP-Proxy-Cache-TTL / Cache-Until
+	ExcludePII   bool   // when true, PII checker can skip caching
 }
 
 // PIIConfig holds PII engine settings.
@@ -165,10 +166,11 @@ func loadConfig(logger *slog.Logger) *Config {
 			BucketTTL:      envStr("SP_PROXY_BUCKET_TTL", "2h"),
 		},
 		Cache: CacheConfig{
-			Enabled:    iBool("SP_PROXY_CACHE_ENABLED", true),
-			MaxMemory:  iInt64("SP_PROXY_CACHE_MAX_MEMORY", 268435456),
-			DefaultTTL: envStr("SP_PROXY_CACHE_DEFAULT_TTL", "60s"),
-			ExcludePII: iBool("SP_PROXY_CACHE_EXCLUDE_PII", true),
+			Enabled:      iBool("SP_PROXY_CACHE_ENABLED", true),
+			MaxMemory:    iInt64("SP_PROXY_CACHE_MAX_MEMORY", 268435456),
+			DefaultTTL:   envStr("SP_PROXY_CACHE_DEFAULT_TTL", "60s"),
+			MaxClientTTL: envStr("SP_PROXY_CACHE_MAX_CLIENT_TTL", "24h"),
+			ExcludePII:   iBool("SP_PROXY_CACHE_EXCLUDE_PII", true),
 		},
 		PII: PIIConfig{
 			FailClosed:       iBool("SP_PROXY_PII_FAIL_CLOSED", true),
