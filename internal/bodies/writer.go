@@ -25,7 +25,7 @@ type Writer struct {
 // NewWriter creates a writer that appends to currentDir. The directory is
 // created if missing.
 func NewWriter(currentDir string) (*Writer, error) {
-	if err := os.MkdirAll(currentDir, 0o755); err != nil {
+	if err := os.MkdirAll(currentDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create current dir: %w", err)
 	}
 	return &Writer{currentDir: currentDir}, nil
@@ -75,7 +75,7 @@ func (w *Writer) rotateIfNeeded() error {
 	}
 
 	path := filepath.Join(w.currentDir, name)
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("open body file %s: %w", name, err)
 	}

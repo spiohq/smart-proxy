@@ -59,20 +59,24 @@ type Store interface {
 // part of the metadata; they live in the JSONL body file alongside the
 // payload. See bodies.BodyEntry for how they are retrieved.
 type RequestLog struct {
-	ID                    string
-	Timestamp             time.Time
-	MerchantKey           string
-	Region                string
-	Method                string
-	Path                  string
-	QueryParams           string
-	StatusCode            int
-	CacheStatus           string // HIT, MISS, BYPASS, PII_EXCLUDED
-	Queued                bool
-	QueueWaitMs           int64
-	UpstreamLatencyMs     int64
-	TotalLatencyMs        int64
-	PIIRedacted           bool
+	ID                string
+	Timestamp         time.Time
+	MerchantKey       string
+	Region            string
+	Method            string
+	Path              string
+	QueryParams       string
+	StatusCode        int
+	CacheStatus       string // HIT, MISS, BYPASS, PII_EXCLUDED
+	Queued            bool
+	QueueWaitMs       int64
+	UpstreamLatencyMs int64
+	TotalLatencyMs    int64
+	// PIIRedactedRequest reports whether the request body was redacted before
+	// persistence. PIIRedactedResponse reports the same for the response body.
+	// Both default to false; logger sets each independently.
+	PIIRedactedRequest    bool
+	PIIRedactedResponse   bool
 	AmazonRequestID       string
 	RequestContentLength  int64
 	ResponseContentLength int64

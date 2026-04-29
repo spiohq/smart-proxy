@@ -363,7 +363,7 @@ func cacheResponseElements(
 		return
 	}
 
-	ttl := resolveTTL(r, tier)
+	ttl := resolveTTL(r, tier, cfg)
 	requestID := RequestIDFromContext(r.Context())
 
 	for i, respElem := range respElements {

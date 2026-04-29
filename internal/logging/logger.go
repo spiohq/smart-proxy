@@ -132,21 +132,50 @@ func (l *AsyncLogger) flush(batch []*LogEntry) {
 }
 
 func (l *AsyncLogger) redactBody(entry *LogEntry) {
-	if !entry.Meta.PIIRedacted || l.piiEngine == nil {
+	if (!entry.Meta.PIIRedactedRequest && !entry.Meta.PIIRedactedResponse) || l.piiEngine == nil {
 		return
 	}
 
 	classifiedPath := endpoint.Classify(entry.Meta.Path)
 
-	// Full-body PII endpoint  -  replace entire body with placeholder
-	if l.piiEngine.Registry().IsFullBodyPII(classifiedPath) {
-		entry.Body.ResponseBody = json.RawMessage(l.piiEngine.RedactFullBody(classifiedPath))
-		return
+	// Response-side redaction (existing semantics, gated on the response flag).
+	if entry.Meta.PIIRedactedResponse {
+		if l.piiEngine.Registry().IsFullBodyPII(classifiedPath) {
+			entry.Body.ResponseBody = json.RawMessage(l.piiEngine.RedactFullBody(classifiedPath))
+		} else if entry.Body.ResponseBody != nil {
+			redacted, _ := l.piiEngine.RedactForLogging(classifiedPath, []byte(entry.Body.ResponseBody))
+			entry.Body.ResponseBody = json.RawMessage(redacted)
+		}
 	}
 
-	// Partial PII  -  redact specific fields
-	if entry.Body.ResponseBody != nil {
-		redacted, _ := l.piiEngine.RedactForLogging(classifiedPath, []byte(entry.Body.ResponseBody))
-		entry.Body.ResponseBody = json.RawMessage(redacted)
+	// Request-side redaction (F-02; gated on the request flag).
+	// Use entry.RequestBodyEndpoint (set by middleware) rather than classifiedPath:
+	// for POST messaging endpoints the method-blind classifier returns the GET
+	// variant, but the request-body rules are keyed on action-specific patterns.
+	if entry.Meta.PIIRedactedRequest && entry.Body.RequestBody != nil {
+		reqEndpoint := entry.RequestBodyEndpoint
+		if reqEndpoint == "" {
+			// Defensive fallback: middleware should always set this when it
+			// sets PIIRedactedRequest. If a future caller bypasses the
+			// middleware (e.g. legacy-record reprocessing), fall back to
+			// the raw classified path so the engine can at least try.
+			reqEndpoint = classifiedPath
+		}
+		redacted, ok := l.piiEngine.RedactRequestBodyForLogging(reqEndpoint, []byte(entry.Body.RequestBody))
+		if ok {
+			entry.Body.RequestBody = json.RawMessage(redacted)
+		} else if l.piiEngine.Registry().IsFullBodyPII(classifiedPath) {
+			// Fail-closed unknown path: RequestBodyPattern returned the raw
+			// (unclassified) path, which has no rules registered, so the
+			// engine returned (body, false). Mirror the response-side
+			// behavior and fall back to the full-body placeholder so the
+			// PIIRedactedRequest=true flag accurately reflects what's on
+			// disk. The engine docstring documents this caller contract.
+			entry.Body.RequestBody = json.RawMessage(l.piiEngine.RedactFullBody(reqEndpoint))
+		}
+		// else: rule lookup found rules but none matched the body fields
+		// (e.g. caller sent a partial schema); leave the body as-is. This
+		// is the same behavior RedactForLogging exhibits on the response
+		// side when no rule matched the actual JSON.
 	}
 }

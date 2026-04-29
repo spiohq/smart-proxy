@@ -114,6 +114,11 @@ func TestClassify(t *testing.T) {
 			expected: "/mfn/v0/shipments",
 		},
 		{
+			name:     "easyShip bulk POST",
+			input:    "/easyShip/2022-03-23/packages/bulk",
+			expected: "/easyShip/2022-03-23/packages/bulk",
+		},
+		{
 			name:     "definitions product types list",
 			input:    "/definitions/2020-09-01/productTypes",
 			expected: "/definitions/2020-09-01/productTypes",
@@ -421,9 +426,24 @@ func TestClassify(t *testing.T) {
 			expected: "/shipping/v2/shipments/{shipmentId}/documents",
 		},
 		{
-			name:     "shipping v2 shipment direct purchase",
-			input:    "/shipping/v2/shipments/SHIP-v2-00001/directPurchase",
-			expected: "/shipping/v2/shipments/{shipmentId}/directPurchase",
+			// Top-level v2 operations -- distinct paths, NOT suffixed under
+			// {shipmentId}. Verified against amzn/.../shippingV2.json:
+			// purchaseShipment is POST /shipping/v2/shipments (4 seg),
+			// directPurchaseShipment is POST /shipping/v2/shipments/directPurchase (5 seg),
+			// getRates is POST /shipping/v2/shipments/rates (5 seg).
+			name:     "shipping v2 directPurchase top-level",
+			input:    "/shipping/v2/shipments/directPurchase",
+			expected: "/shipping/v2/shipments/directPurchase",
+		},
+		{
+			name:     "shipping v2 getRates top-level",
+			input:    "/shipping/v2/shipments/rates",
+			expected: "/shipping/v2/shipments/rates",
+		},
+		{
+			name:     "shipping v2 oneClickShipment top-level",
+			input:    "/shipping/v2/oneClickShipment",
+			expected: "/shipping/v2/oneClickShipment",
 		},
 
 		// ── Merchant Fulfillment v0 ────────────────────────────────────
@@ -612,5 +632,124 @@ func TestClassify(t *testing.T) {
 			got := Classify(tt.input)
 			assert.Equal(t, tt.expected, got)
 		})
+	}
+}
+
+func TestClassifyKnown(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		wantPattern string
+		wantKnown   bool
+	}{
+		{
+			name:        "known parameterized path",
+			input:       "/orders/v0/orders/123-456-789/buyerInfo",
+			wantPattern: "/orders/v0/orders/{orderId}/buyerInfo",
+			wantKnown:   true,
+		},
+		{
+			// Static list endpoints (no parameter segments) are NOT registered
+			// as patterns; the classifier returns them unchanged with ok=false.
+			// Documented here so the fail-closed mode behavior is intentional.
+			name:        "static list path passes through unknown",
+			input:       "/orders/v0/orders",
+			wantPattern: "/orders/v0/orders",
+			wantKnown:   false,
+		},
+		{
+			name:        "known parameterized path with trailing slash",
+			input:       "/orders/v0/orders/123/",
+			wantPattern: "/orders/v0/orders/{orderId}",
+			wantKnown:   true,
+		},
+		{
+			name:        "known parameterized path with query string",
+			input:       "/orders/v0/orders/123?foo=bar",
+			wantPattern: "/orders/v0/orders/{orderId}",
+			wantKnown:   true,
+		},
+		{
+			name:        "shipping v1 shipments POST list -- known",
+			input:       "/shipping/v1/shipments",
+			wantPattern: "/shipping/v1/shipments",
+			wantKnown:   true,
+		},
+		{
+			name:        "shipping v2 shipments POST list -- known",
+			input:       "/shipping/v2/shipments",
+			wantPattern: "/shipping/v2/shipments",
+			wantKnown:   true,
+		},
+		{
+			name:        "mfn v0 shipments POST list -- known",
+			input:       "/mfn/v0/shipments",
+			wantPattern: "/mfn/v0/shipments",
+			wantKnown:   true,
+		},
+		{
+			name:        "easyShip bulk POST -- known",
+			input:       "/easyShip/2022-03-23/packages/bulk",
+			wantPattern: "/easyShip/2022-03-23/packages/bulk",
+			wantKnown:   true,
+		},
+		{
+			name:        "shipping v2 directPurchase top-level -- known",
+			input:       "/shipping/v2/shipments/directPurchase",
+			wantPattern: "/shipping/v2/shipments/directPurchase",
+			wantKnown:   true,
+		},
+		{
+			name:        "shipping v2 getRates top-level -- known",
+			input:       "/shipping/v2/shipments/rates",
+			wantPattern: "/shipping/v2/shipments/rates",
+			wantKnown:   true,
+		},
+		{
+			name:        "shipping v2 oneClickShipment top-level -- known",
+			input:       "/shipping/v2/oneClickShipment",
+			wantPattern: "/shipping/v2/oneClickShipment",
+			wantKnown:   true,
+		},
+		{
+			name:        "unknown path returned as-is, ok=false",
+			input:       "/new-api/2027-01-01/widgets/abc",
+			wantPattern: "/new-api/2027-01-01/widgets/abc",
+			wantKnown:   false,
+		},
+		{
+			name:        "unknown path with query string returned without query, ok=false",
+			input:       "/unknown/v1/resource?foo=bar",
+			wantPattern: "/unknown/v1/resource",
+			wantKnown:   false,
+		},
+		{
+			name:        "completely empty",
+			input:       "",
+			wantPattern: "",
+			wantKnown:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pattern, ok := ClassifyKnown(tt.input)
+			assert.Equal(t, tt.wantPattern, pattern)
+			assert.Equal(t, tt.wantKnown, ok)
+		})
+	}
+}
+
+// TestClassify_DelegatesToClassifyKnown ensures Classify and ClassifyKnown
+// agree on the pattern, even though Classify discards the boolean.
+func TestClassify_DelegatesToClassifyKnown(t *testing.T) {
+	for _, in := range []string{
+		"/orders/v0/orders",
+		"/orders/v0/orders/123-1-1/buyerInfo",
+		"/some/unknown/path",
+		"",
+	} {
+		want, _ := ClassifyKnown(in)
+		assert.Equal(t, want, Classify(in), "input=%q", in)
 	}
 }

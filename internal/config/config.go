@@ -6,14 +6,15 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
 // RateLimitConfig holds rate limiting settings.
 type RateLimitConfig struct {
 	Enabled        bool
-	DefaultMode    string            // "queue", "reject", "queue-timeout"
-	QueueTimeout   string            // Duration string, e.g. "60s"
+	DefaultMode    string // "queue", "reject", "queue-timeout"
+	QueueTimeout   string // Duration string, e.g. "60s"
 	QueueMaxDepth  int
 	ThrottleFactor float64           // 0.0-1.0, default 0.8
 	BucketTTL      string            // Duration string for GC, e.g. "2h"
@@ -23,10 +24,20 @@ type RateLimitConfig struct {
 
 // CacheConfig holds caching settings.
 type CacheConfig struct {
-	Enabled    bool
-	MaxMemory  int64  // bytes, default 256 MB
-	DefaultTTL string // duration string, e.g. "60s"
-	ExcludePII bool   // when true, PII checker can skip caching
+	Enabled      bool
+	MaxMemory    int64  // bytes, default 256 MB
+	DefaultTTL   string // duration string, e.g. "60s"
+	MaxClientTTL string // duration string; clamps client-supplied X-SP-Proxy-Cache-TTL / Cache-Until
+	ExcludePII   bool   // when true, PII checker can skip caching
+}
+
+// PIIConfig holds PII engine settings.
+type PIIConfig struct {
+	// FailClosed makes the PII engine treat any path it does not recognize as
+	// PII-bearing. New SP-API endpoints added upstream are then redacted and
+	// excluded from cache by default until the registry is updated.
+	FailClosed       bool
+	QueryParamsExtra []string // SP_PROXY_PII_QUERY_PARAMS=foo,bar
 }
 
 // StorageConfig holds database storage settings.
@@ -56,7 +67,9 @@ type S3Config struct {
 	Endpoint  string // Custom endpoint for MinIO/R2; empty for real AWS
 	AccessKey string
 	SecretKey string
-	PathStyle bool // Required for MinIO; harmless for AWS
+	PathStyle bool   // Required for MinIO; harmless for AWS
+	SSE       string // Server-side encryption: "" | "AES256" | "aws:kms" | "aws:kms:dsse"
+	SSEKMSKey string // KMS key ARN/alias for SSE=aws:kms{,:dsse}; optional
 }
 
 // PurgeConfig holds purge/retention settings for background jobs.
@@ -75,9 +88,13 @@ type PrometheusConfig struct {
 // Config holds all configuration for the proxy. Only ServerConfig is populated
 // in Phase 1  -  other sub-configs will be added in later phases.
 type Config struct {
+	// Env is "production" | "development" (default). In production mode the
+	// proxy refuses to start with insecure defaults (e.g. plain-http S3 endpoints).
+	Env        string
 	Server     ServerConfig
 	RateLimit  RateLimitConfig
 	Cache      CacheConfig
+	PII        PIIConfig
 	Storage    StorageConfig
 	Bodies     BodiesConfig
 	Purge      PurgeConfig
@@ -95,11 +112,14 @@ type RDTConfig struct {
 // In tests, use port 0 with net.Listen to let the OS assign a free port;
 // but for config semantics, 0 means "don't start this listener".
 type ServerConfig struct {
-	PortEU          int
-	PortNA          int
-	PortFE          int
-	PortDashboard   int
-	ShutdownTimeout string
+	PortEU            int
+	PortNA            int
+	PortFE            int
+	PortDashboard     int
+	DashboardBindAddr string // SP_PROXY_DASHBOARD_BIND_ADDR; "127.0.0.1" by default
+	RegionBindAddr    string // SP_PROXY_REGION_BIND_ADDR; "127.0.0.1" by default
+	StrictMerchant    bool   // SP_PROXY_STRICT_MERCHANT; reject requests with no resolvable merchant
+	ShutdownTimeout   string
 }
 
 // Load reads configuration from environment variables with defaults.
@@ -126,12 +146,16 @@ func loadConfig(logger *slog.Logger) *Config {
 		iBool = func(key string, fallback bool) bool { return envBoolLog(logger, key, fallback) }
 	}
 	return &Config{
+		Env: envStr("SP_PROXY_ENV", "development"),
 		Server: ServerConfig{
-			PortEU:          iInt("SP_PROXY_PORT_EU", 8080),
-			PortNA:          iInt("SP_PROXY_PORT_NA", 8081),
-			PortFE:          iInt("SP_PROXY_PORT_FE", 8082),
-			PortDashboard:   iInt("SP_PROXY_PORT_DASHBOARD", 9090),
-			ShutdownTimeout: envStr("SP_PROXY_SHUTDOWN_TIMEOUT", "30s"),
+			PortEU:            iInt("SP_PROXY_PORT_EU", 8080),
+			PortNA:            iInt("SP_PROXY_PORT_NA", 8081),
+			PortFE:            iInt("SP_PROXY_PORT_FE", 8082),
+			PortDashboard:     iInt("SP_PROXY_PORT_DASHBOARD", 9090),
+			DashboardBindAddr: envStr("SP_PROXY_DASHBOARD_BIND_ADDR", "127.0.0.1"),
+			RegionBindAddr:    envStr("SP_PROXY_REGION_BIND_ADDR", "127.0.0.1"),
+			StrictMerchant:    iBool("SP_PROXY_STRICT_MERCHANT", false),
+			ShutdownTimeout:   envStr("SP_PROXY_SHUTDOWN_TIMEOUT", "30s"),
 		},
 		RateLimit: RateLimitConfig{
 			Enabled:        iBool("SP_PROXY_RATELIMIT_ENABLED", true),
@@ -142,10 +166,15 @@ func loadConfig(logger *slog.Logger) *Config {
 			BucketTTL:      envStr("SP_PROXY_BUCKET_TTL", "2h"),
 		},
 		Cache: CacheConfig{
-			Enabled:    iBool("SP_PROXY_CACHE_ENABLED", true),
-			MaxMemory:  iInt64("SP_PROXY_CACHE_MAX_MEMORY", 268435456),
-			DefaultTTL: envStr("SP_PROXY_CACHE_DEFAULT_TTL", "60s"),
-			ExcludePII: iBool("SP_PROXY_CACHE_EXCLUDE_PII", true),
+			Enabled:      iBool("SP_PROXY_CACHE_ENABLED", true),
+			MaxMemory:    iInt64("SP_PROXY_CACHE_MAX_MEMORY", 268435456),
+			DefaultTTL:   envStr("SP_PROXY_CACHE_DEFAULT_TTL", "60s"),
+			MaxClientTTL: envStr("SP_PROXY_CACHE_MAX_CLIENT_TTL", "24h"),
+			ExcludePII:   iBool("SP_PROXY_CACHE_EXCLUDE_PII", true),
+		},
+		PII: PIIConfig{
+			FailClosed:       iBool("SP_PROXY_PII_FAIL_CLOSED", true),
+			QueryParamsExtra: envStrSlice("SP_PROXY_PII_QUERY_PARAMS"),
 		},
 		Storage: StorageConfig{
 			Backend:    envStr("SP_PROXY_STORAGE_BACKEND", "sqlite"),
@@ -167,11 +196,13 @@ func loadConfig(logger *slog.Logger) *Config {
 				AccessKey: envStr("SP_PROXY_S3_ACCESS_KEY", ""),
 				SecretKey: envStr("SP_PROXY_S3_SECRET_KEY", ""),
 				PathStyle: iBool("SP_PROXY_S3_PATH_STYLE", false),
+				SSE:       envStr("SP_PROXY_S3_SSE", ""),
+				SSEKMSKey: envStr("SP_PROXY_S3_SSE_KMS_KEY", ""),
 			},
 		},
 		Purge: PurgeConfig{
 			MetadataRetention: envStr("SP_PROXY_PURGE_METADATA_RETENTION", "720h"),
-			AuditRetention:    envStr("SP_PROXY_PURGE_AUDIT_RETENTION", "8760h"),
+			AuditRetention:    envStr("SP_PROXY_PURGE_AUDIT_RETENTION", "9504h"),
 		},
 		Prometheus: PrometheusConfig{
 			Enabled: iBool("SP_PROXY_PROMETHEUS_ENABLED", true),
@@ -282,6 +313,24 @@ func envBoolLog(logger *slog.Logger, key string, fallback bool) bool {
 	return fallback
 }
 
+// envStrSlice parses a comma-separated env var into a slice. Empty strings
+// after splitting are dropped. Whitespace around items is trimmed.
+func envStrSlice(key string) []string {
+	v := os.Getenv(key)
+	if v == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func validatePositiveDuration(name, val string) error {
 	d, err := time.ParseDuration(val)
 	if err != nil {
@@ -347,6 +396,14 @@ func (c *Config) Validate() error {
 			if c.Bodies.S3.Bucket == "" {
 				return fmt.Errorf("SP_PROXY_S3_BUCKET is required when SP_PROXY_BODIES_BACKEND=s3")
 			}
+			switch c.Bodies.S3.SSE {
+			case "", "AES256", "aws:kms", "aws:kms:dsse":
+			default:
+				return fmt.Errorf("invalid SP_PROXY_S3_SSE %q (want AES256|aws:kms|aws:kms:dsse)", c.Bodies.S3.SSE)
+			}
+			if c.IsProduction() && hasInsecureS3Endpoint(c.Bodies.S3.Endpoint) {
+				return fmt.Errorf("SP_PROXY_S3_ENDPOINT %q uses plain http; refuse to start in production (set SP_PROXY_ENV=development to override, or use https)", c.Bodies.S3.Endpoint)
+			}
 		default:
 			return fmt.Errorf("invalid SP_PROXY_BODIES_BACKEND %q (want local|s3)", c.Bodies.Backend)
 		}
@@ -373,4 +430,64 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// IsProduction reports whether SP_PROXY_ENV is set to production.
+// The check is case-insensitive.
+func (c *Config) IsProduction() bool {
+	return strings.EqualFold(c.Env, "production")
+}
+
+// Warnings returns non-fatal configuration concerns surfaced for logging.
+// In production these are upgraded to errors by Validate(); in development
+// they are advisory.
+func (c *Config) Warnings() []string {
+	var w []string
+	if c.Bodies.Enabled && c.Bodies.Backend == "s3" {
+		if hasInsecureS3Endpoint(c.Bodies.S3.Endpoint) {
+			w = append(w, fmt.Sprintf("SP_PROXY_S3_ENDPOINT %q uses plain http; SigV4 credentials and PII-redacted bodies travel unencrypted. Use https in production.", c.Bodies.S3.Endpoint))
+		}
+		if c.Bodies.S3.SSE == "" {
+			w = append(w, "SP_PROXY_S3_SSE is empty; relying on bucket-default encryption. Set SP_PROXY_S3_SSE=AES256 (or aws:kms) to enforce server-side encryption explicitly.")
+		}
+	}
+
+	if !c.IsProduction() {
+		return w
+	}
+
+	// DPP/AUP warnings (production-only).
+	if !c.PII.FailClosed {
+		w = append(w, "SP_PROXY_PII_FAIL_CLOSED=false in production: unknown SP-API endpoints will be logged unredacted, violating DPP §2.6.")
+	}
+	if !c.Cache.ExcludePII {
+		w = append(w, "SP_PROXY_CACHE_EXCLUDE_PII=false in production: PII responses will be cached, violating DPP §2.1 retention.")
+	}
+	if d, err := time.ParseDuration(c.Bodies.ArchiveMaxAge); err == nil && d > 30*24*time.Hour {
+		w = append(w, fmt.Sprintf("SP_PROXY_BODIES_ARCHIVE_MAX_AGE=%s exceeds 30d in production: PII bodies retained beyond DPP §2.1 limit.", c.Bodies.ArchiveMaxAge))
+	}
+	if d, err := time.ParseDuration(c.Purge.MetadataRetention); err == nil && d > 18*30*24*time.Hour {
+		w = append(w, fmt.Sprintf("SP_PROXY_PURGE_METADATA_RETENTION=%s exceeds 18 months in production: violates DPP §1.7 non-PII retention limit.", c.Purge.MetadataRetention))
+	}
+	if d, err := time.ParseDuration(c.Purge.AuditRetention); err == nil && d < 12*30*24*time.Hour {
+		w = append(w, fmt.Sprintf("SP_PROXY_PURGE_AUDIT_RETENTION=%s is below 12 months in production: violates DPP §2.6 audit log retention.", c.Purge.AuditRetention))
+	}
+	if c.Server.DashboardBindAddr != "127.0.0.1" && c.Server.DashboardBindAddr != "::1" && c.Server.DashboardBindAddr != "localhost" {
+		w = append(w, fmt.Sprintf("SP_PROXY_DASHBOARD_BIND_ADDR=%q is non-loopback in production: ensure an authenticating reverse proxy is in front of the dashboard.", c.Server.DashboardBindAddr))
+	}
+	if c.Server.RegionBindAddr != "127.0.0.1" && c.Server.RegionBindAddr != "::1" && c.Server.RegionBindAddr != "localhost" {
+		w = append(w, fmt.Sprintf("SP_PROXY_REGION_BIND_ADDR=%q is non-loopback in production: callers can reach the proxy without network-level access control. The proxy reads X-SP-Proxy-Merchant-Id without authentication and any reachable client can self-claim any merchant identity.", c.Server.RegionBindAddr))
+	}
+
+	return w
+}
+
+// hasInsecureS3Endpoint reports whether the configured endpoint is a plain-http URL.
+// An empty endpoint (real AWS) is always considered secure since the SDK uses https.
+func hasInsecureS3Endpoint(endpoint string) bool {
+	if endpoint == "" {
+		return false
+	}
+	lower := strings.ToLower(endpoint)
+	return strings.HasPrefix(lower, "http://")
 }

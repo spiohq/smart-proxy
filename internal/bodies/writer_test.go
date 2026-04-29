@@ -89,3 +89,35 @@ func TestWriter_Write_FileNameFormat(t *testing.T) {
 
 	assert.Regexp(t, `^\d{4}-\d{2}-\d{2}-\d{2}\.jsonl$`, file)
 }
+
+func TestWriter_FilesWrittenAt0o600(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(dir)
+	require.NoError(t, err)
+	defer w.Close()
+
+	entry := &BodyEntry{ID: "x", RequestBody: json.RawMessage(`{}`), ResponseBody: json.RawMessage(`{}`)}
+	_, _, _, err = w.Write(context.Background(), entry)
+	require.NoError(t, err)
+
+	matches, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	require.NoError(t, err)
+	require.NotEmpty(t, matches)
+
+	info, err := os.Stat(matches[0])
+	require.NoError(t, err)
+	mode := info.Mode().Perm()
+	assert.Equal(t, os.FileMode(0o600), mode,
+		"body files must be 0o600 to satisfy DPP §2.6 boundary on shared hosts; got %o", mode)
+}
+
+func TestWriter_DirCreatedAt0o700(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "subdir")
+	_, err := NewWriter(dir)
+	require.NoError(t, err)
+
+	info, err := os.Stat(dir)
+	require.NoError(t, err)
+	mode := info.Mode().Perm()
+	assert.Equal(t, os.FileMode(0o700), mode, "current/ dir must be 0o700; got %o", mode)
+}

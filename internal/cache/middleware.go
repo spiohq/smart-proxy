@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/spiohq/smart-proxy/internal/config"
@@ -83,11 +84,13 @@ func CacheMiddleware(c Cache, tiers *TierClassifier, cfg *config.CacheConfig) fu
 				return
 			}
 
-			// Standard GET cache key
+			// Standard GET cache key. Sanitize the client-supplied custom
+			// suffix (F-05): drop chars outside [A-Za-z0-9_-] and truncate
+			// to 64 chars so it cannot be used as a probing oracle.
 			key := GenerateCacheKey(
 				m.Key, r.Method, r.URL.Path,
 				r.URL.RawQuery,
-				r.Header.Get("X-SP-Proxy-Cache-Key"),
+				sanitizeCacheKeySuffix(r.Header.Get("X-SP-Proxy-Cache-Key")),
 			)
 
 			// Cache lookup
@@ -128,7 +131,7 @@ func CacheMiddleware(c Cache, tiers *TierClassifier, cfg *config.CacheConfig) fu
 
 			// Cache 2xx responses
 			if rec.statusCode >= 200 && rec.statusCode < 300 {
-				ttl := resolveTTL(r, tier)
+				ttl := resolveTTL(r, tier, cfg)
 				resp := &CachedResponse{
 					StatusCode:      rec.statusCode,
 					Headers:         rec.headers.Clone(),
@@ -174,12 +177,32 @@ func (rec *responseRecorder) Write(b []byte) (int, error) {
 // 1. X-SP-Proxy-Cache-Until (absolute RFC3339 time)
 // 2. X-SP-Proxy-Cache-TTL (duration string)
 // 3. Tier default TTL
-func resolveTTL(r *http.Request, tier TierConfig) time.Duration {
+//
+// Client-supplied TTLs are clamped to cfg.MaxClientTTL (default 24h) to
+// prevent a misbehaving caller from poisoning their merchant's cache for
+// arbitrarily long durations. The tier default is NOT clamped -- operators
+// who configure long tier TTLs are trusted.
+//
+// Pentest finding F-05.
+func resolveTTL(r *http.Request, tier TierConfig, cfg *config.CacheConfig) time.Duration {
+	maxTTL := 24 * time.Hour
+	if cfg != nil && cfg.MaxClientTTL != "" {
+		if d, err := time.ParseDuration(cfg.MaxClientTTL); err == nil && d > 0 {
+			maxTTL = d
+		}
+	}
+	clamp := func(d time.Duration) time.Duration {
+		if d > maxTTL {
+			return maxTTL
+		}
+		return d
+	}
+
 	// Priority 1: absolute time
 	if until := r.Header.Get("X-SP-Proxy-Cache-Until"); until != "" {
 		if t, err := time.Parse(time.RFC3339, until); err == nil {
 			if d := time.Until(t); d > 0 {
-				return d
+				return clamp(d)
 			}
 		}
 	}
@@ -187,10 +210,31 @@ func resolveTTL(r *http.Request, tier TierConfig) time.Duration {
 	// Priority 2: relative duration
 	if ttlStr := r.Header.Get("X-SP-Proxy-Cache-TTL"); ttlStr != "" {
 		if d, err := time.ParseDuration(ttlStr); err == nil && d > 0 {
-			return d
+			return clamp(d)
 		}
 	}
 
-	// Priority 3: tier default
+	// Priority 3: tier default (operator-trusted, not clamped)
 	return tier.DefaultTTL
+}
+
+// cacheKeySuffixRe drops disallowed characters from the client-supplied
+// X-SP-Proxy-Cache-Key suffix.
+var cacheKeySuffixRe = regexp.MustCompile(`[^A-Za-z0-9_-]`)
+
+// sanitizeCacheKeySuffix strips disallowed characters and truncates the
+// suffix to 64 chars. Without this, the client could use the suffix as an
+// oracle for cache-key probing or to craft suffixes that collide with
+// internal key structure.
+//
+// Pentest finding F-05.
+func sanitizeCacheKeySuffix(s string) string {
+	if s == "" {
+		return ""
+	}
+	cleaned := cacheKeySuffixRe.ReplaceAllString(s, "")
+	if len(cleaned) > 64 {
+		cleaned = cleaned[:64]
+	}
+	return cleaned
 }

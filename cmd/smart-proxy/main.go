@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -45,8 +46,11 @@ func main() {
 		slog.Error("invalid configuration", "error", err)
 		os.Exit(1)
 	}
-
 	resolver := merchant.NewResolver(nil)
+	resolver.SetStrict(cfg.Server.StrictMerchant)
+	if cfg.Server.StrictMerchant {
+		slog.Info("strict merchant resolution enabled: requests without X-SP-Proxy-Merchant-Id or X-Amz-Access-Token are rejected with 400")
+	}
 
 	// Rate limiter
 	limiter := ratelimit.NewLimiter(
@@ -61,7 +65,11 @@ func main() {
 	rlMiddleware := ratelimit.RateLimitMiddleware(limiter, &cfg.RateLimit)
 
 	// Cache + PII
-	registry := pii.NewRegistry()
+	registry := pii.NewRegistryWithExtras(cfg.PII.QueryParamsExtra)
+	registry.SetFailClosed(cfg.PII.FailClosed)
+	if cfg.PII.FailClosed {
+		slog.Info("PII fail-closed mode enabled: unknown endpoints treated as PII")
+	}
 	var cacheMiddleware proxy.Middleware
 	var memCache *cache.MemoryCache
 	if cfg.Cache.Enabled {
@@ -136,6 +144,27 @@ func main() {
 		"version": "dev",
 	})
 
+	// Surface configuration warnings as logs AND audit events. The audit-event
+	// trail is the operator's evidence, in a DPP audit, that they were warned
+	// about non-conformant defaults at startup.
+	for _, w := range cfg.Warnings() {
+		slog.Warn("configuration warning", "message", w)
+		_ = auditLogger.Log(ctx, audit.EventDPPComplianceWarning, "config", w, nil)
+	}
+
+	// F-21 helper: nudge operators away from long-lived IAM-user keys for
+	// the proxy's own S3 access. The proxy itself does not store the key
+	// (it only holds it in-memory for the AWS SDK), but a static AKIA...
+	// secret paired with a plaintext bucket compounds blast radius if the
+	// host is compromised. STS / role assumption is the safer path; pair
+	// it with SP_PROXY_S3_SSE so PutObject calls enforce server-side
+	// encryption rather than relying on bucket-default behavior.
+	if matched, _ := regexp.MatchString(`^AKIA[A-Z0-9]{16}$`, cfg.Bodies.S3.AccessKey); matched && cfg.Bodies.S3.SSE == "" {
+		w := "SP_PROXY_S3_ACCESS_KEY looks like a long-lived IAM user key (AKIA...) and SP_PROXY_S3_SSE is empty. Migrate to STS / role assumption and set SP_PROXY_S3_SSE=AES256 (or aws:kms) to enforce server-side encryption."
+		slog.Warn("configuration warning", "message", w)
+		_ = auditLogger.Log(ctx, audit.EventDPPComplianceWarning, "config", w, nil)
+	}
+
 	// Parse purge retention durations
 	metadataRetention, _ := time.ParseDuration(cfg.Purge.MetadataRetention)
 	auditRetention, _ := time.ParseDuration(cfg.Purge.AuditRetention)
@@ -171,10 +200,16 @@ func main() {
 	}
 
 	// Dashboard handler
-	dashHandler := dashboard.NewHandler(metaStore, auditStore, bodyStore)
+	dashHandler := dashboard.NewHandlerWithPII(metaStore, auditStore, bodyStore, piiEngine)
 	dashMux := dashboard.NewMux(dashHandler)
 
-	// Mount /metrics on dashboard mux (or separate port)
+	// Mount /metrics on dashboard mux (or separate port).
+	// /metrics is mounted on the bare mux BEFORE the security-headers
+	// wrapping (F-03) so Prometheus scrapes don't pay the CSP/cache-control
+	// overhead. The security headers are harmless to scrapers, but adding
+	// them to a metrics endpoint would mislead anyone debugging the headers
+	// later about which endpoints are part of the dashboard vs the
+	// observability surface.
 	if cfg.Prometheus.Enabled {
 		if cfg.Prometheus.Port == 0 {
 			// Serve on dashboard port
@@ -231,7 +266,11 @@ func main() {
 		return proxy.BuildChain(rp, middlewares...)
 	}
 
-	srv, err := server.New(cfg, factory, dashMux)
+	// Wrap the dashboard mux with the security-headers middleware (F-03)
+	// before handing it to the server. /metrics was already attached above
+	// and inherits the headers harmlessly.
+	dashRoot := dashboard.SecurityHeadersMiddleware(dashMux)
+	srv, err := server.New(cfg, factory, dashRoot)
 	if err != nil {
 		slog.Error("failed to create server", "error", err)
 		os.Exit(1)
@@ -251,12 +290,14 @@ func newBodyBackend(ctx context.Context, cfg *config.Config) (blob.Backend, erro
 		return blob.NewLocal(cfg.Bodies.BasePath)
 	case "s3":
 		return blob.NewS3(ctx, blob.S3Options{
-			Bucket:    cfg.Bodies.S3.Bucket,
-			Region:    cfg.Bodies.S3.Region,
-			Endpoint:  cfg.Bodies.S3.Endpoint,
-			AccessKey: cfg.Bodies.S3.AccessKey,
-			SecretKey: cfg.Bodies.S3.SecretKey,
-			PathStyle: cfg.Bodies.S3.PathStyle,
+			Bucket:      cfg.Bodies.S3.Bucket,
+			Region:      cfg.Bodies.S3.Region,
+			Endpoint:    cfg.Bodies.S3.Endpoint,
+			AccessKey:   cfg.Bodies.S3.AccessKey,
+			SecretKey:   cfg.Bodies.S3.SecretKey,
+			PathStyle:   cfg.Bodies.S3.PathStyle,
+			SSE:         cfg.Bodies.S3.SSE,
+			SSEKMSKeyID: cfg.Bodies.S3.SSEKMSKey,
 		})
 	default:
 		return nil, fmt.Errorf("unsupported bodies backend: %s", cfg.Bodies.Backend)

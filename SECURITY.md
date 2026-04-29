@@ -4,6 +4,69 @@ The Smart Proxy team takes security seriously. We appreciate responsible disclos
 
 ---
 
+## Deployment Requirements
+
+Smart Proxy does **not** perform application-level encryption at rest. Operators MUST satisfy these requirements when handling production SP-API traffic:
+
+### Encrypted storage volumes
+
+The proxy persists two things to disk: a SQLite metadata DB (`SP_PROXY_SQLITE_PATH`, default `/data/sp-proxy.db`) and the active hour of body JSONL files (`SP_PROXY_BODIES_PATH/current/`, default `/data/bodies`). Bodies are PII-redacted before write (see [docs/DPP_COMPLIANCE.md](docs/DPP_COMPLIANCE.md)), but request metadata (paths, query strings, status codes, latencies) is stored in the clear.
+
+Mount the proxy's data volume on encrypted block storage:
+
+- **AWS:** EBS encryption (default for new volumes since 2023) or encrypted EFS.
+- **GCP:** Persistent Disks are encrypted by default.
+- **Azure:** Managed Disks with SSE.
+- **Self-hosted / bare metal:** LUKS, dm-crypt, or ZFS native encryption.
+- **Kubernetes:** Use a StorageClass backed by an encrypted CSI driver.
+
+Tokens (LWA + RDT) live in **process memory only** and never hit disk. Restarting the proxy drops the cache cold.
+
+### Object storage encryption
+
+When `SP_PROXY_BODIES_BACKEND=s3`, set `SP_PROXY_S3_SSE` to enforce server-side encryption on every PutObject (see [docs/STORAGE.md](docs/STORAGE.md#server-side-encryption)). Pair with a bucket policy that denies unencrypted uploads.
+
+**Application-level encryption is intentionally not implemented.** Operators provide at-rest protection via volume encryption (EBS, LUKS, dm-crypt) and S3 server-side encryption (`SP_PROXY_S3_SSE`).
+
+### S3 backend credentials
+
+If you configure `SP_PROXY_BODIES_BACKEND=s3` with a long-lived IAM user key (`AKIA...` access-key-ID prefix), the proxy emits a `dpp_compliance_warning` audit event on every startup until you migrate to STS-issued credentials AND set `SP_PROXY_S3_SSE=AES256` (or `aws:kms`). Long-lived static keys plus plaintext (no-SSE) buckets compound the blast radius of a host compromise; rotate to short-lived role-assumed credentials and enforce server-side encryption.
+
+The proxy itself never persists `SP_PROXY_S3_ACCESS_KEY` -- it lives in process memory only and is passed to the AWS SDK. The warning is operator-help to nudge a compounding-risk configuration toward the safer pattern.
+
+### Prometheus metrics endpoint
+
+By default `/metrics` is mounted on the dashboard port (loopback-only when `SP_PROXY_DASHBOARD_BIND_ADDR=127.0.0.1`). If you front the dashboard with an authenticating reverse proxy, decide explicitly whether scraping should share that auth boundary:
+
+- **Easiest:** keep `SP_PROXY_PROMETHEUS_PORT=0` (default) and let your reverse-proxy / scraper auth at the same gate as the dashboard.
+- **Cleaner separation:** set `SP_PROXY_PROMETHEUS_PORT=9091` (or any other port). Scraping then has its own listener you can firewall independently of the dashboard.
+
+Prometheus labels include `merchant`, so a scrape job exposed beyond the operator's network would leak per-tenant traffic shape. Keep `/metrics` on a network where only the metrics collector can reach it.
+
+### Network exposure
+
+Smart Proxy is designed to run as a **sidecar or private-network component**. It MUST NOT be exposed directly to the public internet without an authenticating reverse proxy in front of it. The proxy honors `X-SP-Proxy-Merchant-Id` for tenant identification; an unauthenticated public endpoint would let any caller self-claim any merchant key.
+
+Recommended deployment shapes:
+
+- Same-host sidecar (loopback only).
+- Private VPC subnet, accessed by your application via an internal load balancer.
+- Behind an authenticating reverse proxy (mTLS, OAuth, IP allowlist).
+
+The dashboard (`SP_PROXY_PORT_DASHBOARD`, default `9090`) ships **without authentication**. It MUST be bound to a private interface or sit behind an auth layer; never expose it to the internet.
+
+The dashboard now defaults to bind address `127.0.0.1` (`SP_PROXY_DASHBOARD_BIND_ADDR`). For container deployments, use a host-side `127.0.0.1:9090:9090` port mapping and set `SP_PROXY_DASHBOARD_BIND_ADDR=0.0.0.0` inside the container. The container will emit a `dpp_compliance_warning` audit event indicating that an authenticating reverse proxy must front the host port; this is the expected audit signal.
+
+The region (data-plane) listeners now default to bind address `127.0.0.1` (`SP_PROXY_REGION_BIND_ADDR`) for the same reason. **Upgrade note for non-compose deployments:** the previous binary listened on `0.0.0.0` for the region ports unconditionally. Operators upgrading from a pre-F-01 release who reach the region ports via a LAN, VPN, or external load balancer must explicitly opt in by setting `SP_PROXY_REGION_BIND_ADDR=0.0.0.0` (or a specific interface address). The reference `docker-compose.yml` already sets `SP_PROXY_REGION_BIND_ADDR=0.0.0.0` inside the container alongside host-side `127.0.0.1:port` mappings; deployments based on it are unaffected.
+
+### Migration 007 rollback note
+
+The 0.x release that lands the F-02 work introduces a SQLite migration (`007_pii_redacted_split.sql`) that splits the legacy `pii_redacted` column into `pii_redacted_request` + `pii_redacted_response`. The new binary writes only the new columns and leaves `pii_redacted` static at its backfilled value. **An operator who rolls back to a pre-F-02 binary after migration 007 has been applied will see `piiRedacted=false` in the dashboard for any rows written by the new binary**, regardless of whether the response was actually redacted. The data on disk is correct (the new columns hold the truth) -- only the pre-F-02 binary cannot see it. If a rollback is necessary, the safe window is: roll back before any meaningful traffic has been processed by the new binary.
+
+For the full DPP/AUP compliance reference -- shared-responsibility matrix, audit-prep checklist, and operator-specific touch points -- see [docs/DPP_COMPLIANCE.md](docs/DPP_COMPLIANCE.md).
+
+---
+
 ## Reporting a Vulnerability
 
 **Do not open public GitHub issues for security vulnerabilities.**

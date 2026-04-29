@@ -1,9 +1,11 @@
 package audit
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -175,4 +177,68 @@ func TestMarshalMetadata_NilMap(t *testing.T) {
 func TestMarshalMetadata_ValidMap(t *testing.T) {
 	result := MarshalMetadata(map[string]any{"count": 42})
 	assert.Contains(t, result, "42")
+}
+
+// ── Audit unmarshal-error logging (F-19) ──────────────────────────────────
+
+func TestQueryAuditEvents_LogsCorruptedMetadata(t *testing.T) {
+	db := newTestDB(t)
+	store := NewSQLiteStore(db)
+
+	// Insert a row with deliberately malformed JSON in the metadata column.
+	_, err := db.Exec(
+		`INSERT INTO audit_log (id, timestamp, event_type, source, message, metadata)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		"corrupt-001", time.Now().UTC(), "test", "pentest", "msg", "this-is-not-json",
+	)
+	require.NoError(t, err)
+
+	// Capture slog output.
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	defer slog.SetDefault(prev)
+
+	rows, _, err := store.QueryAuditEvents(context.Background(), AuditFilter{
+		From: time.Now().Add(-1 * time.Hour),
+		To:   time.Now().Add(1 * time.Hour),
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	// The row is returned but with nil metadata.
+	assert.Nil(t, rows[0].Metadata)
+
+	// And the slog output names the bad event so an operator can find it.
+	logged := buf.String()
+	assert.Contains(t, logged, "audit metadata unmarshal failed")
+	assert.Contains(t, logged, "corrupt-001")
+}
+
+func TestQueryAuditEvents_ValidMetadataDoesNotLog(t *testing.T) {
+	// Sanity: well-formed metadata produces no warning.
+	db := newTestDB(t)
+	store := NewSQLiteStore(db)
+
+	require.NoError(t, store.LogAuditEvent(context.Background(), &AuditEvent{
+		ID:        "ok-001",
+		Timestamp: time.Now().UTC(),
+		EventType: "test",
+		Source:    "pentest",
+		Message:   "msg",
+		Metadata:  map[string]any{"k": "v"},
+	}))
+
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	defer slog.SetDefault(prev)
+
+	rows, _, err := store.QueryAuditEvents(context.Background(), AuditFilter{
+		From: time.Now().Add(-1 * time.Hour),
+		To:   time.Now().Add(1 * time.Hour),
+	})
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	assert.Equal(t, "v", rows[0].Metadata["k"])
+	assert.NotContains(t, buf.String(), "audit metadata unmarshal failed")
 }

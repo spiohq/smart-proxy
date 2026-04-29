@@ -11,11 +11,15 @@ services:
       - "8080:8080"   # EU region
       - "8081:8081"   # NA region
       - "8082:8082"   # FE region
-      - "9090:9090"   # Dashboard
+      # Dashboard host-side mapping is loopback-only by default. See
+      # docker-compose.yml comment and docs/DPP_COMPLIANCE.md for context.
+      - "127.0.0.1:9090:9090"
     volumes:
       - dev-data:/data
     env_file:
       - deploy/example.env
+    environment:
+      SP_PROXY_DASHBOARD_BIND_ADDR: "0.0.0.0"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9090/_sp-proxy/health"]
       interval: 10s

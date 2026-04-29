@@ -14,6 +14,7 @@ import (
 	"github.com/spiohq/smart-proxy/internal/cache"
 	"github.com/spiohq/smart-proxy/internal/merchant"
 	"github.com/spiohq/smart-proxy/internal/pii"
+	"github.com/spiohq/smart-proxy/internal/proxy"
 	"github.com/spiohq/smart-proxy/internal/storage"
 )
 
@@ -39,6 +40,12 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 			requestID := GenerateRequestID()
 			ctx := cache.ContextWithRequestID(r.Context(), requestID)
 			r = r.WithContext(ctx)
+
+			// Prepare a context slot for the rich internal upstream-error
+			// classification (F-16). The proxy's ErrorHandler writes into
+			// this slot; the public X-SP-Proxy-Error-Reason header carries
+			// only the coarse externally-safe value.
+			r, getInternalErrorReason := proxy.PrepareInternalErrorReason(r)
 
 			// Wrap response writer to capture status + body
 			capture := NewResponseCapture(w, int(maxCaptureSize))
@@ -69,7 +76,10 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 			cacheStatus := capture.Header().Get("X-SP-Proxy-Cache")
 
 			reqHeaders := headerToMap(pii.RedactHeaders(r.Header))
-			respHeaders := headerToMap(capture.Header())
+			// Response headers go through the same SensitiveHeaders filter
+			// as request headers (F-12). Amazon does not normally emit
+			// session-bearing values, but the symmetry is defensive.
+			respHeaders := headerToMap(pii.RedactHeaders(capture.Header()))
 
 			meta := &storage.RequestLog{
 				ID:                    requestID,
@@ -78,7 +88,7 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 				Region:                region,
 				Method:                r.Method,
 				Path:                  r.URL.Path,
-				QueryParams:           r.URL.RawQuery,
+				QueryParams:           pii.RedactQueryString(r.URL.RawQuery, piiRegistry.QueryParamsExtra()),
 				StatusCode:            capture.StatusCode(),
 				CacheStatus:           cacheStatus,
 				TotalLatencyMs:        totalLatency,
@@ -101,8 +111,16 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 				}
 			}
 
-			// Error reason (set by proxy ErrorHandler for 502s)
-			if reason := capture.Header().Get("X-SP-Proxy-Error-Reason"); reason != "" {
+			// Error reason (set by proxy ErrorHandler for 502s).
+			// F-16: store the rich internal classification from the
+			// context slot (not exposed to the caller); fall back to the
+			// coarse public header for paths that don't go through the
+			// upstream ErrorHandler (e.g. rate-limit's
+			// "client_disconnected_in_queue", which is set directly on
+			// the response header by the rate-limit middleware).
+			if reason := getInternalErrorReason(); reason != "" {
+				meta.ErrorReason = reason
+			} else if reason := capture.Header().Get("X-SP-Proxy-Error-Reason"); reason != "" {
 				meta.ErrorReason = reason
 			}
 
@@ -123,7 +141,7 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 					ResponseHeaders: respHeaders,
 				}
 			} else {
-				responseBody := decompressIfGzip(capture.CapturedBody(), capture.Header())
+				responseBody := decompressIfGzipBounded(capture.CapturedBody(), capture.Header(), 4*maxCaptureSize)
 				bodyEntry := &bodies.BodyEntry{
 					ID:              requestID,
 					RequestHeaders:  reqHeaders,
@@ -137,7 +155,11 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 				}
 
 				if piiRegistry.ContainsPII(r) {
-					meta.PIIRedacted = true
+					meta.PIIRedactedResponse = true
+				}
+				if piiRegistry.RequestBodyContainsPII(r) {
+					meta.PIIRedactedRequest = true
+					entry.RequestBodyEndpoint = piiRegistry.RequestBodyPattern(r)
 				}
 
 				entry.Body = bodyEntry
@@ -148,10 +170,23 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 	}
 }
 
-// decompressIfGzip decompresses gzip-encoded body bytes for logging.
-// When the client sends Accept-Encoding: gzip, Go's ReverseProxy passes
-// compressed bytes through without decoding. We need the raw JSON for storage.
+// decompressIfGzip decompresses gzip-encoded body bytes for logging using
+// the default decompression cap of 4 * DefaultMaxCaptureSize. When the client
+// sends Accept-Encoding: gzip, Go's ReverseProxy passes compressed bytes
+// through without decoding -- we need the raw JSON for storage.
 func decompressIfGzip(data []byte, header http.Header) []byte {
+	return decompressIfGzipBounded(data, header, 4*int64(DefaultMaxCaptureSize))
+}
+
+// decompressIfGzipBounded is like decompressIfGzip but caps the decompressed
+// output at maxOut bytes. This defends against gzip-bomb amplification: a
+// 256 KiB highly-compressed payload can otherwise expand into hundreds of MB
+// in process memory. On overflow the function returns the original
+// (compressed) bytes -- the redaction engine will detect non-JSON content
+// downstream and skip its rule walk, which is the correct fail-soft choice.
+//
+// Pentest finding F-09.
+func decompressIfGzipBounded(data []byte, header http.Header, maxOut int64) []byte {
 	if len(data) == 0 {
 		return data
 	}
@@ -163,8 +198,16 @@ func decompressIfGzip(data []byte, header http.Header) []byte {
 		return data
 	}
 	defer gr.Close()
-	decoded, err := io.ReadAll(gr)
+	// io.LimitReader caps the decompressed read at maxOut+1 to detect
+	// overflow: if we read maxOut+1 bytes, the input would have produced
+	// more, so we treat that as a bomb and fall back to the compressed
+	// bytes rather than partially decoded data.
+	limited := io.LimitReader(gr, maxOut+1)
+	decoded, err := io.ReadAll(limited)
 	if err != nil {
+		return data
+	}
+	if int64(len(decoded)) > maxOut {
 		return data
 	}
 	return decoded

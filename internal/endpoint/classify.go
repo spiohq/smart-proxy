@@ -104,15 +104,28 @@ var endpointPatterns = []struct {
 	// 5 segments
 	{"/shipping/v1/shipments/", 5, "", "/shipping/v1/shipments/{shipmentId}"},
 	{"/shipping/v1/tracking/", 5, "", "/shipping/v1/tracking/{trackingId}"},
+	// 4 segments (list/POST endpoint -- more specific patterns above)
+	{"/shipping/v1/shipments", 4, "", "/shipping/v1/shipments"},
 
 	// ── Shipping v2 ────────────────────────────────────────────────────
 	// 6 segments (disambiguated by suffix)
 	{"/shipping/v2/shipments/", 6, "cancel", "/shipping/v2/shipments/{shipmentId}/cancel"},
 	{"/shipping/v2/shipments/", 6, "documents", "/shipping/v2/shipments/{shipmentId}/documents"},
-	{"/shipping/v2/shipments/", 6, "directPurchase", "/shipping/v2/shipments/{shipmentId}/directPurchase"},
+	// 5 segments (top-level operations on the shipments collection)
+	{"/shipping/v2/shipments/rates", 5, "", "/shipping/v2/shipments/rates"},
+	{"/shipping/v2/shipments/directPurchase", 5, "", "/shipping/v2/shipments/directPurchase"},
+	// 4 segments (purchaseShipment list/POST endpoint -- more specific patterns above)
+	{"/shipping/v2/shipments", 4, "", "/shipping/v2/shipments"},
+	// Other top-level v2 operations (separate paths, not under /shipments)
+	{"/shipping/v2/oneClickShipment", 4, "", "/shipping/v2/oneClickShipment"},
 
 	// ── Merchant Fulfillment v0 ────────────────────────────────────────
+	// 4 segments (list/POST endpoint -- before the 5-segment {shipmentId})
+	{"/mfn/v0/shipments", 4, "", "/mfn/v0/shipments"},
 	{"/mfn/v0/shipments/", 5, "", "/mfn/v0/shipments/{shipmentId}"},
+
+	// ── EasyShip ───────────────────────────────────────────────────────
+	{"/easyShip/2022-03-23/packages/bulk", 5, "", "/easyShip/2022-03-23/packages/bulk"},
 
 	// ── Notifications v1 ───────────────────────────────────────────────
 	{"/notifications/v1/subscriptions/", 5, "", "/notifications/v1/subscriptions/{type}"},
@@ -166,6 +179,15 @@ var endpointPatterns = []struct {
 // Query strings are stripped and trailing slashes are removed before matching.
 // If no pattern matches, the cleaned path is returned as-is.
 func Classify(path string) string {
+	pattern, _ := ClassifyKnown(path)
+	return pattern
+}
+
+// ClassifyKnown is like Classify but also reports whether the path matched a
+// registered SP-API endpoint pattern. Callers that need fail-closed behavior
+// (e.g. PII redaction) use ok=false to treat the path as unknown and apply
+// strict defaults rather than falling back to "no rules apply".
+func ClassifyKnown(path string) (pattern string, ok bool) {
 	if idx := strings.IndexByte(path, '?'); idx != -1 {
 		path = path[:idx]
 	}
@@ -175,10 +197,10 @@ func Classify(path string) string {
 	for _, ep := range endpointPatterns {
 		if strings.HasPrefix(path, ep.prefix) && segmentCount == ep.segments {
 			if ep.suffix == "" || strings.HasSuffix(path, "/"+ep.suffix) {
-				return ep.pattern
+				return ep.pattern, true
 			}
 		}
 	}
 
-	return path
+	return path, false
 }

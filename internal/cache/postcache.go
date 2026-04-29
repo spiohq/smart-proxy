@@ -88,7 +88,7 @@ func handlePostCache(
 
 	// Cache 2xx responses
 	if rec.statusCode >= 200 && rec.statusCode < 300 {
-		ttl := resolveTTL(r, tier)
+		ttl := resolveTTL(r, tier, cfg)
 		resp := &CachedResponse{
 			StatusCode:      rec.statusCode,
 			Headers:         rec.headers.Clone(),
@@ -104,15 +104,20 @@ func handlePostCache(
 // generatePostCacheKey creates a deterministic cache key for a POST request.
 // Format: "merchantKey:POST:path:sha256(normalized-body)"
 // Non-identity fields are stripped before hashing.
+//
+// The hash is the FULL SHA-256 (32 bytes / 64 hex chars), not a truncation.
+// Truncating to 128 bits made birthday collisions feasible at 2^64
+// requests; using the full digest costs ~32 extra bytes per cache key
+// and removes the discussion entirely. F-25.
 func generatePostCacheKey(merchantKey, path string, body []byte) (string, error) {
 	normalized, err := normalizeBody(body)
 	if err != nil {
 		// Fallback: hash raw body
 		h := sha256.Sum256(body)
-		return fmt.Sprintf("%s:POST:%s:%x", merchantKey, path, h[:16]), nil
+		return fmt.Sprintf("%s:POST:%s:%x", merchantKey, path, h[:]), nil
 	}
 	h := sha256.Sum256(normalized)
-	return fmt.Sprintf("%s:POST:%s:%x", merchantKey, path, h[:16]), nil
+	return fmt.Sprintf("%s:POST:%s:%x", merchantKey, path, h[:]), nil
 }
 
 // normalizeBody parses the JSON body, removes non-identity fields, and

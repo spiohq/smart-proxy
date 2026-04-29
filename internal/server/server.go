@@ -73,12 +73,23 @@ func (s *Server) Start() error {
 			handler = http.NotFoundHandler()
 		}
 
-		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", sc.RegionBindAddr, port))
 		if err != nil {
 			return fmt.Errorf("listen %s port %d: %w", region, port, err)
 		}
 
-		httpSrv := &http.Server{Handler: handler}
+		// Timeouts: only ReadHeaderTimeout and IdleTimeout are set. ReadTimeout
+		// and WriteTimeout would conflict with the rate-limiter's queueing
+		// behavior -- ThrottleModeQueue can legitimately hold a request for
+		// minutes (cfg.RateLimit.QueueTimeout, up to 10min for some
+		// operations), and large feed/MFN-bulk uploads can take a while too.
+		// ReadHeaderTimeout closes the actual Slowloris vector (header-only
+		// floods); IdleTimeout recycles Keep-Alive slots.
+		httpSrv := &http.Server{
+			Handler:           handler,
+			ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout:       120 * time.Second,
+		}
 
 		s.mu.Lock()
 		s.regionServers[region] = httpSrv
@@ -94,12 +105,22 @@ func (s *Server) Start() error {
 	}
 
 	// Dashboard
-	dashLn, err := net.Listen("tcp", fmt.Sprintf(":%d", sc.PortDashboard))
+	dashLn, err := net.Listen("tcp", fmt.Sprintf("%s:%d", sc.DashboardBindAddr, sc.PortDashboard))
 	if err != nil {
 		return fmt.Errorf("listen dashboard port %d: %w", sc.PortDashboard, err)
 	}
 
-	dashSrv := &http.Server{Handler: s.dashboardHandler}
+	// Same rationale as the region server: ReadHeaderTimeout closes the
+	// Slowloris vector, IdleTimeout recycles Keep-Alive slots. ReadTimeout
+	// and WriteTimeout are left at zero so streaming JSONL log responses
+	// are not artificially capped, and so the configuration stays
+	// symmetric with the region server (operators read both sites and the
+	// asymmetry would invite a "fix" that breaks queue-mode requests).
+	dashSrv := &http.Server{
+		Handler:           s.dashboardHandler,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 
 	s.mu.Lock()
 	s.dashboardServer = dashSrv

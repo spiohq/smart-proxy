@@ -35,7 +35,8 @@ type TestEnv struct {
 }
 
 type testEnvExtras struct {
-	tokenMap map[string]string
+	tokenMap     map[string]string
+	piiFailClose bool
 }
 
 type Option func(*config.Config, *testEnvExtras)
@@ -86,6 +87,13 @@ func WithTokenMap(tokenMap map[string]string) Option {
 
 func WithRDTAutoMint() Option {
 	return func(cfg *config.Config, _ *testEnvExtras) { cfg.RDT.AutoMint = true }
+}
+
+func WithPIIFailClosed() Option {
+	return func(cfg *config.Config, extras *testEnvExtras) {
+		cfg.PII.FailClosed = true
+		extras.piiFailClose = true
+	}
 }
 
 func NewTestEnv(t *testing.T, opts ...Option) *TestEnv {
@@ -146,7 +154,8 @@ func NewTestEnv(t *testing.T, opts ...Option) *TestEnv {
 	limiter := ratelimit.NewLimiter(cfg.RateLimit.ThrottleFactor, cfg.RateLimit.QueueMaxDepth)
 	rlMiddleware := ratelimit.RateLimitMiddleware(limiter, &cfg.RateLimit)
 
-	registry := pii.NewRegistry()
+	registry := pii.NewRegistryWithExtras(cfg.PII.QueryParamsExtra)
+	registry.SetFailClosed(extras.piiFailClose || cfg.PII.FailClosed)
 	var cacheMiddleware proxy.Middleware
 	if cfg.Cache.Enabled {
 		mc := cache.NewMemoryCache(cfg.Cache.MaxMemory)

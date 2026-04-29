@@ -2,14 +2,29 @@ services:
   smart-proxy:
     image: ghcr.io/spiohq/smart-proxy:latest
     ports:
-      - "8080:8080"   # EU region
-      - "8081:8081"   # NA region
-      - "8082:8082"   # FE region
-      - "9090:9090"   # Dashboard
+      # Region ports loopback-only by default. The proxy reads
+      # X-SP-Proxy-Merchant-Id without authentication; exposing the region
+      # ports to a network where any caller can self-claim a merchant
+      # identity is a deliberate operator choice. See SECURITY.md.
+      - "127.0.0.1:8080:8080"   # EU region
+      - "127.0.0.1:8081:8081"   # NA region
+      - "127.0.0.1:8082:8082"   # FE region
+      # Dashboard host-side mapping is loopback-only by default. The dashboard
+      # ships without authentication; expose to the network only behind an
+      # authenticating reverse proxy. See SECURITY.md and docs/DPP_COMPLIANCE.md.
+      - "127.0.0.1:9090:9090"
     volumes:
       - proxy-data:/data
     env_file:
       - deploy/example.env
+    environment:
+      # Inside the container, bind to all interfaces so Docker's port-forward
+      # works. The host-side 127.0.0.1 mappings above enforce the loopback
+      # restriction. The container emits dpp_compliance_warning audit events
+      # for both non-loopback binds; that is the expected audit signal that
+      # an authenticating reverse proxy must front the host ports.
+      SP_PROXY_DASHBOARD_BIND_ADDR: "0.0.0.0"
+      SP_PROXY_REGION_BIND_ADDR: "0.0.0.0"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9090/_sp-proxy/health"]
       interval: 30s

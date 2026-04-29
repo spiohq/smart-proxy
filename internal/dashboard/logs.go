@@ -3,10 +3,19 @@ package dashboard
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"regexp"
 	"time"
 
+	"github.com/spiohq/smart-proxy/internal/endpoint"
 	"github.com/spiohq/smart-proxy/internal/storage"
 )
+
+// statusFilterRe constrains the ?status= query parameter on /api/v1/logs.
+// Three-digit codes (200, 404) or Nxx buckets (4xx, 5xx) only.
+//
+// Pentest finding F-18.
+var statusFilterRe = regexp.MustCompile(`^([1-5][0-9]{2}|[1-5]xx)$`)
 
 func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 	from, to, err := parseTimeRange(r, 1*time.Hour)
@@ -40,13 +49,24 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 		maxLatency = int64(v)
 	}
 
+	// Validate status filter (F-18). SQLite silently coerces non-numeric
+	// strings to 0 against an INTEGER column, so "?status=garbage"
+	// quietly returns rows where status_code=0 (i.e. nothing). Reject
+	// anything that's not a three-digit code or an Nxx bucket so the
+	// behavior is unambiguous to operators.
+	statusParam := r.URL.Query().Get("status")
+	if statusParam != "" && !statusFilterRe.MatchString(statusParam) {
+		writeError(w, http.StatusBadRequest, "invalid status filter (want 200, 4xx, etc.)")
+		return
+	}
+
 	filter := storage.LogFilter{
 		From:        from,
 		To:          to,
 		Merchant:    r.URL.Query().Get("merchant"),
 		Region:      r.URL.Query().Get("region"),
 		Endpoint:    r.URL.Query().Get("endpoint"),
-		Status:      r.URL.Query().Get("status"),
+		Status:      statusParam,
 		CacheStatus: r.URL.Query().Get("cacheStatus"),
 		Method:      r.URL.Query().Get("method"),
 		Queued:      r.URL.Query().Get("queued"),
@@ -77,7 +97,9 @@ func (h *Handler) handleLogs(w http.ResponseWriter, r *http.Request) {
 			UpstreamLatencyMs:     row.UpstreamLatencyMs,
 			RequestContentLength:  row.RequestContentLength,
 			ResponseContentLength: row.ResponseContentLength,
-			PIIRedacted:           row.PIIRedacted,
+			PIIRedactedRequest:    row.PIIRedactedRequest,
+			PIIRedactedResponse:   row.PIIRedactedResponse,
+			PIIRedacted:           row.PIIRedactedRequest || row.PIIRedactedResponse,
 			AmazonRequestID:       row.AmazonRequestID,
 			ErrorReason:           row.ErrorReason,
 		})
@@ -101,7 +123,9 @@ type logListEntry struct {
 	UpstreamLatencyMs     int64     `json:"upstreamLatencyMs"`
 	RequestContentLength  int64     `json:"requestContentLength"`
 	ResponseContentLength int64     `json:"responseContentLength"`
-	PIIRedacted           bool      `json:"piiRedacted"`
+	PIIRedactedRequest    bool      `json:"piiRedactedRequest"`
+	PIIRedactedResponse   bool      `json:"piiRedactedResponse"`
+	PIIRedacted           bool      `json:"piiRedacted"` // legacy OR shim -- keep for one release
 	AmazonRequestID       string    `json:"amazonRequestId,omitempty"`
 	ErrorReason           string    `json:"errorReason,omitempty"`
 }
@@ -127,7 +151,9 @@ type logDetailResponse struct {
 	TotalLatencyMs        int64             `json:"totalLatencyMs"`
 	RequestContentLength  int64             `json:"requestContentLength"`
 	ResponseContentLength int64             `json:"responseContentLength"`
-	PIIRedacted           bool              `json:"piiRedacted"`
+	PIIRedactedRequest    bool              `json:"piiRedactedRequest"`
+	PIIRedactedResponse   bool              `json:"piiRedactedResponse"`
+	PIIRedacted           bool              `json:"piiRedacted"` // legacy OR shim -- keep for one release
 	AmazonRequestID       string            `json:"amazonRequestId,omitempty"`
 	ErrorReason           string            `json:"errorReason,omitempty"`
 	HasBody               bool              `json:"hasBody"`
@@ -178,7 +204,9 @@ func (h *Handler) handleLogByID(w http.ResponseWriter, r *http.Request) {
 		TotalLatencyMs:        entry.TotalLatencyMs,
 		RequestContentLength:  entry.RequestContentLength,
 		ResponseContentLength: entry.ResponseContentLength,
-		PIIRedacted:           entry.PIIRedacted,
+		PIIRedactedRequest:    entry.PIIRedactedRequest,
+		PIIRedactedResponse:   entry.PIIRedactedResponse,
+		PIIRedacted:           entry.PIIRedactedRequest || entry.PIIRedactedResponse,
 		AmazonRequestID:       entry.AmazonRequestID,
 		ErrorReason:           entry.ErrorReason,
 		HasBody:               hasBody,
@@ -238,11 +266,64 @@ func (h *Handler) handleLogBody(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Read-side redaction filter (F-15). Legacy entries written before F-02
+	// closed the write-side leak may contain unredacted PII; re-run the
+	// engine on both directions so the API never returns stored PII even
+	// when the metadata flag is misleading. After F-02 this is mostly
+	// belt-and-suspenders against future write-side bugs.
+	if h.piiEngine != nil {
+		classified := endpoint.Classify(entry.Path)
+		reg := h.piiEngine.Registry()
+
+		// Response side: same logic the async logger uses.
+		if body.ResponseBody != nil {
+			if reg.IsFullBodyPII(classified) {
+				body.ResponseBody = json.RawMessage(h.piiEngine.RedactFullBody(classified))
+			} else {
+				redacted, _ := h.piiEngine.RedactForLogging(classified, []byte(body.ResponseBody))
+				body.ResponseBody = json.RawMessage(redacted)
+			}
+		}
+
+		// Request side: only fires for non-GET methods. The engine's
+		// RedactRequestBodyForLogging needs the action-specific pattern for
+		// messaging POST endpoints; the dashboard does not have access to
+		// the original *http.Request, so we reconstruct the lookup using
+		// the stored Method+Path. RequestBodyPattern handles this method-aware
+		// lookup correctly.
+		if body.RequestBody != nil && entry.Method != "" && entry.Method != http.MethodGet {
+			// Build a synthetic request to drive RequestBodyPattern.
+			synth := &http.Request{Method: entry.Method, URL: mustURL(entry.Path)}
+			reqPattern := reg.RequestBodyPattern(synth)
+			if reqPattern != "" {
+				redacted, ok := h.piiEngine.RedactRequestBodyForLogging(reqPattern, []byte(body.RequestBody))
+				if ok {
+					body.RequestBody = json.RawMessage(redacted)
+				} else if reg.IsFullBodyPII(classified) {
+					// Fail-closed unknown path: same fallback as the async logger.
+					body.RequestBody = json.RawMessage(h.piiEngine.RedactFullBody(reqPattern))
+				}
+			}
+		}
+	}
+
 	resp := map[string]json.RawMessage{
 		"requestBody":  body.RequestBody,
 		"responseBody": body.ResponseBody,
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// mustURL parses a stored path into a minimal *url.URL for use as a synthetic
+// request URL when re-running redaction read-side. Stored paths come from
+// real requests, so parsing should not fail; if it does we fall back to a
+// URL that exercises the same code path safely.
+func mustURL(path string) *url.URL {
+	u, err := url.Parse(path)
+	if err != nil {
+		return &url.URL{Path: path}
+	}
+	return u
 }
 
 func (h *Handler) handleMerchants(w http.ResponseWriter, r *http.Request) {

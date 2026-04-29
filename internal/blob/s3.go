@@ -42,12 +42,21 @@ type S3Options struct {
 	// PathStyle forces path-style addressing. Required for MinIO and most
 	// self-hosted S3 implementations; R2 and real AWS work with either.
 	PathStyle bool
+	// SSE, when non-empty, sets the ServerSideEncryption header on every
+	// PutObject. Accepted values: "AES256", "aws:kms", "aws:kms:dsse".
+	// Leaving it empty falls back to the bucket's default encryption.
+	SSE string
+	// SSEKMSKeyID is the KMS key ARN/alias used when SSE is "aws:kms" or
+	// "aws:kms:dsse". Optional; if empty AWS uses the bucket-default key.
+	SSEKMSKeyID string
 }
 
 // S3Backend implements Backend against an S3-compatible object store.
 type S3Backend struct {
-	client S3API
-	bucket string
+	client      S3API
+	bucket      string
+	sse         types.ServerSideEncryption
+	sseKMSKeyID string
 }
 
 // NewS3 constructs an S3Backend by loading AWS config and instantiating a
@@ -55,6 +64,10 @@ type S3Backend struct {
 func NewS3(ctx context.Context, opts S3Options) (*S3Backend, error) {
 	if opts.Bucket == "" {
 		return nil, fmt.Errorf("s3 backend: bucket is required")
+	}
+	sse, err := parseSSE(opts.SSE)
+	if err != nil {
+		return nil, err
 	}
 	var loadOpts []func(*awsconfig.LoadOptions) error
 	if opts.Region != "" {
@@ -75,12 +88,27 @@ func NewS3(ctx context.Context, opts S3Options) (*S3Backend, error) {
 		}
 		o.UsePathStyle = opts.PathStyle
 	})
-	return &S3Backend{client: client, bucket: opts.Bucket}, nil
+	return &S3Backend{
+		client:      client,
+		bucket:      opts.Bucket,
+		sse:         sse,
+		sseKMSKeyID: opts.SSEKMSKeyID,
+	}, nil
 }
 
 // NewS3WithClient lets callers inject a pre-built S3 client (or a mock).
 func NewS3WithClient(client S3API, bucket string) *S3Backend {
 	return &S3Backend{client: client, bucket: bucket}
+}
+
+// NewS3WithClientSSE is like NewS3WithClient but also sets server-side
+// encryption headers on every PutObject. Useful for tests.
+func NewS3WithClientSSE(client S3API, bucket, sse, kmsKeyID string) (*S3Backend, error) {
+	parsed, err := parseSSE(sse)
+	if err != nil {
+		return nil, err
+	}
+	return &S3Backend{client: client, bucket: bucket, sse: parsed, sseKMSKeyID: kmsKeyID}, nil
 }
 
 func (b *S3Backend) Put(ctx context.Context, key string, r io.Reader, size int64) error {
@@ -92,10 +120,33 @@ func (b *S3Backend) Put(ctx context.Context, key string, r io.Reader, size int64
 	if size >= 0 {
 		input.ContentLength = aws.Int64(size)
 	}
+	if b.sse != "" {
+		input.ServerSideEncryption = b.sse
+		if b.sseKMSKeyID != "" && (b.sse == types.ServerSideEncryptionAwsKms || b.sse == types.ServerSideEncryptionAwsKmsDsse) {
+			input.SSEKMSKeyId = aws.String(b.sseKMSKeyID)
+		}
+	}
 	if _, err := b.client.PutObject(ctx, input); err != nil {
 		return fmt.Errorf("s3 put %s: %w", key, err)
 	}
 	return nil
+}
+
+// parseSSE validates and converts a string SSE setting to the SDK type.
+// Empty string means "no explicit header"; the bucket's default applies.
+func parseSSE(s string) (types.ServerSideEncryption, error) {
+	switch s {
+	case "":
+		return "", nil
+	case "AES256":
+		return types.ServerSideEncryptionAes256, nil
+	case "aws:kms":
+		return types.ServerSideEncryptionAwsKms, nil
+	case "aws:kms:dsse":
+		return types.ServerSideEncryptionAwsKmsDsse, nil
+	default:
+		return "", fmt.Errorf("s3 backend: unsupported SSE value %q (want AES256|aws:kms|aws:kms:dsse)", s)
+	}
 }
 
 func (b *S3Backend) Get(ctx context.Context, key string, offset, length int64) (io.ReadCloser, error) {

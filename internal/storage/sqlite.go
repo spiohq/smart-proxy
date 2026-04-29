@@ -3,7 +3,9 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -26,6 +28,22 @@ func NewSQLiteStore(path string) (*SQLiteStore, error) {
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		db.Close()
 		return nil, err
+	}
+
+	// Tighten file modes. SQLite creates the WAL and SHM files with the
+	// process umask (typically 0o644 on Unix), not the main DB file's mode,
+	// so we have to chmod each one explicitly. Missing files are tolerated
+	// for the first-run case where the WAL has not yet been flushed.
+	// Maintain() uses PRAGMA wal_checkpoint(TRUNCATE), which zeroes the WAL
+	// in place rather than recreating the inode, so this chmod persists
+	// for the lifetime of the process.
+	if path != ":memory:" {
+		for _, p := range []string{path, path + "-wal", path + "-shm"} {
+			if err := os.Chmod(p, 0o600); err != nil && !errors.Is(err, os.ErrNotExist) {
+				db.Close()
+				return nil, fmt.Errorf("chmod %s: %w", p, err)
+			}
+		}
 	}
 
 	store := &SQLiteStore{db: db}
@@ -72,10 +90,10 @@ func (s *SQLiteStore) LogRequestBatch(ctx context.Context, entries []*RequestLog
 		request_content_length, response_content_length,
 		cache_status, queued, queue_wait_ms,
 		upstream_latency_ms, total_latency_ms,
-		pii_redacted, amazon_request_id,
+		pii_redacted_request, pii_redacted_response, amazon_request_id,
 		body_file, body_offset, body_length,
 		cached_from_id, error_reason
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare insert: %w", err)
 	}
@@ -88,7 +106,7 @@ func (s *SQLiteStore) LogRequestBatch(ctx context.Context, entries []*RequestLog
 			e.RequestContentLength, e.ResponseContentLength,
 			e.CacheStatus, e.Queued, e.QueueWaitMs,
 			e.UpstreamLatencyMs, e.TotalLatencyMs,
-			e.PIIRedacted, e.AmazonRequestID,
+			e.PIIRedactedRequest, e.PIIRedactedResponse, e.AmazonRequestID,
 			e.BodyFile, e.BodyOffset, e.BodyLength,
 			e.CachedFromID, e.ErrorReason,
 		)
@@ -157,7 +175,7 @@ func (s *SQLiteStore) QueryByTimeRange(ctx context.Context, from, to time.Time) 
 			request_content_length, response_content_length,
 			cache_status, queued, queue_wait_ms,
 			upstream_latency_ms, total_latency_ms,
-			pii_redacted, amazon_request_id,
+			pii_redacted_request, pii_redacted_response, amazon_request_id,
 			body_file, body_offset, body_length,
 			cached_from_id, error_reason
 		 FROM request_logs WHERE timestamp >= ? AND timestamp < ?
@@ -177,7 +195,7 @@ func (s *SQLiteStore) QueryByTimeRange(ctx context.Context, from, to time.Time) 
 			&e.RequestContentLength, &e.ResponseContentLength,
 			&e.CacheStatus, &e.Queued, &e.QueueWaitMs,
 			&e.UpstreamLatencyMs, &e.TotalLatencyMs,
-			&e.PIIRedacted, &e.AmazonRequestID,
+			&e.PIIRedactedRequest, &e.PIIRedactedResponse, &e.AmazonRequestID,
 			&e.BodyFile, &e.BodyOffset, &e.BodyLength,
 			&e.CachedFromID, &e.ErrorReason,
 		)
@@ -199,7 +217,7 @@ func (s *SQLiteStore) QueryByID(ctx context.Context, id string) (*RequestLog, er
 			request_content_length, response_content_length,
 			cache_status, queued, queue_wait_ms,
 			upstream_latency_ms, total_latency_ms,
-			pii_redacted, amazon_request_id,
+			pii_redacted_request, pii_redacted_response, amazon_request_id,
 			body_file, body_offset, body_length,
 			cached_from_id, error_reason
 		 FROM request_logs WHERE id = ?`, id,
@@ -209,7 +227,7 @@ func (s *SQLiteStore) QueryByID(ctx context.Context, id string) (*RequestLog, er
 		&e.RequestContentLength, &e.ResponseContentLength,
 		&e.CacheStatus, &e.Queued, &e.QueueWaitMs,
 		&e.UpstreamLatencyMs, &e.TotalLatencyMs,
-		&e.PIIRedacted, &e.AmazonRequestID,
+		&e.PIIRedactedRequest, &e.PIIRedactedResponse, &e.AmazonRequestID,
 		&e.BodyFile, &e.BodyOffset, &e.BodyLength,
 		&e.CachedFromID, &e.ErrorReason,
 	)
@@ -247,7 +265,7 @@ func (s *SQLiteStore) QueryLogs(ctx context.Context, filter LogFilter) ([]*Reque
 		request_content_length, response_content_length,
 		cache_status, queued, queue_wait_ms,
 		upstream_latency_ms, total_latency_ms,
-		pii_redacted, amazon_request_id,
+		pii_redacted_request, pii_redacted_response, amazon_request_id,
 		body_file, body_offset, body_length,
 		cached_from_id, error_reason
 	 FROM request_logs` + where + ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`
@@ -268,7 +286,7 @@ func (s *SQLiteStore) QueryLogs(ctx context.Context, filter LogFilter) ([]*Reque
 			&e.RequestContentLength, &e.ResponseContentLength,
 			&e.CacheStatus, &e.Queued, &e.QueueWaitMs,
 			&e.UpstreamLatencyMs, &e.TotalLatencyMs,
-			&e.PIIRedacted, &e.AmazonRequestID,
+			&e.PIIRedactedRequest, &e.PIIRedactedResponse, &e.AmazonRequestID,
 			&e.BodyFile, &e.BodyOffset, &e.BodyLength,
 			&e.CachedFromID, &e.ErrorReason,
 		)
@@ -278,6 +296,16 @@ func (s *SQLiteStore) QueryLogs(ctx context.Context, filter LogFilter) ([]*Reque
 		result = append(result, e)
 	}
 	return result, total, rows.Err()
+}
+
+// escapeLikePrefix escapes SQLite LIKE wildcards (%, _) and the escape
+// character itself so that user input is matched literally rather than
+// as a pattern. Pair with `LIKE ? ESCAPE '\'` in the SQL.
+//
+// Pentest finding F-17.
+func escapeLikePrefix(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
 }
 
 func buildLogWhereClause(f LogFilter) (string, []any) {
@@ -293,16 +321,16 @@ func buildLogWhereClause(f LogFilter) (string, []any) {
 		args = append(args, f.To.UTC())
 	}
 	if f.Merchant != "" {
-		clauses = append(clauses, "merchant_key LIKE ?")
-		args = append(args, f.Merchant+"%")
+		clauses = append(clauses, `merchant_key LIKE ? ESCAPE '\'`)
+		args = append(args, escapeLikePrefix(f.Merchant)+"%")
 	}
 	if f.Region != "" {
 		clauses = append(clauses, "region = ?")
 		args = append(args, f.Region)
 	}
 	if f.Endpoint != "" {
-		clauses = append(clauses, "path LIKE ?")
-		args = append(args, f.Endpoint+"%")
+		clauses = append(clauses, `path LIKE ? ESCAPE '\'`)
+		args = append(args, escapeLikePrefix(f.Endpoint)+"%")
 	}
 	if f.Status != "" {
 		if len(f.Status) == 3 && f.Status[1:] == "xx" {
@@ -352,9 +380,9 @@ func (s *SQLiteStore) DistinctMerchants(ctx context.Context, prefix string, limi
 	var args []any
 	if prefix != "" {
 		query = `SELECT merchant_key FROM request_logs
-			WHERE merchant_key LIKE ? AND merchant_key != ''
+			WHERE merchant_key LIKE ? ESCAPE '\' AND merchant_key != ''
 			GROUP BY merchant_key ORDER BY MAX(timestamp) DESC LIMIT ?`
-		args = []any{prefix + "%", limit}
+		args = []any{escapeLikePrefix(prefix) + "%", limit}
 	} else {
 		query = `SELECT merchant_key FROM request_logs
 			WHERE merchant_key != ''

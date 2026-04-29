@@ -47,7 +47,7 @@ func TestRunMigrations_Idempotent(t *testing.T) {
 	var count int
 	err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM schema_migrations").Scan(&count)
 	require.NoError(t, err)
-	assert.Equal(t, 4, count, "should have applied all migration files")
+	assert.Equal(t, 5, count, "should have applied all migration files")
 }
 
 func TestRunMigrations_CreatesIndexes(t *testing.T) {
