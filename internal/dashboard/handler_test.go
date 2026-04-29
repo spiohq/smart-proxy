@@ -507,6 +507,91 @@ func TestHandleLogBody_ReadSideRedaction_LegacyMessagingRequestBody(t *testing.T
 	assert.NotContains(t, respBody, "Hauptstrasse")
 }
 
+func TestHandleLogBody_ReadSideRedaction_LegacyOrdersV0ResponseBody(t *testing.T) {
+	// Response-side coverage. Symmetric to the request-side tests but exercises
+	// the field-level RedactForLogging path (orders/v0/orders has rules
+	// for $.payload.Orders[*].BuyerInfo.* and ShippingAddress.*).
+	id := "legacy-orders-001"
+	ls := &mockLogStore{
+		logs: []*storage.RequestLog{{
+			ID:         id,
+			Timestamp:  time.Now().UTC(),
+			Method:     "GET",
+			Path:       "/orders/v0/orders",
+			StatusCode: 200,
+			BodyFile:   "legacy-orders.jsonl",
+			BodyOffset: 0,
+			BodyLength: 400,
+		}},
+	}
+	bs := &mockBodyStoreMap{
+		entries: map[string]*bodies.BodyEntry{
+			"legacy-orders.jsonl": {
+				ID: id,
+				ResponseBody: json.RawMessage(`{"payload":{"Orders":[{"AmazonOrderId":"903-3489051-5871062","BuyerInfo":{"BuyerEmail":"buyer@example.com","BuyerName":"Maria Schmidt"},"ShippingAddress":{"Name":"Maria Schmidt","AddressLine1":"Hauptstrasse 42"}}]}}`),
+			},
+		},
+	}
+
+	engine := pii.NewEngine(pii.NewRegistry())
+	h := NewHandlerWithPII(ls, &mockAuditStore{}, bs, engine)
+	mux := NewMux(h)
+
+	req := httptest.NewRequest("GET", "/api/v1/logs/"+id+"/body", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	respBody := rec.Body.String()
+	assert.NotContains(t, respBody, "Maria Schmidt", "F-15: read-side filter must redact legacy response BuyerInfo / ShippingAddress")
+	assert.NotContains(t, respBody, "buyer@example.com")
+	assert.NotContains(t, respBody, "Hauptstrasse 42")
+	assert.Contains(t, respBody, "903-3489051-5871062", "Order IDs are not direct PII; preserved")
+}
+
+func TestHandleLogBody_ReadSideRedaction_LegacyFullBodyPIIResponse(t *testing.T) {
+	// IsFullBodyPII path: /orders/v0/orders/{orderId}/buyerInfo is in the
+	// fullBodyEndpoints set, so a legacy response gets replaced with the
+	// placeholder document instead of field-level redaction.
+	id := "legacy-buyerinfo-001"
+	ls := &mockLogStore{
+		logs: []*storage.RequestLog{{
+			ID:         id,
+			Timestamp:  time.Now().UTC(),
+			Method:     "GET",
+			Path:       "/orders/v0/orders/903-3489051-5871062/buyerInfo",
+			StatusCode: 200,
+			BodyFile:   "legacy-buyerinfo.jsonl",
+			BodyOffset: 0,
+			BodyLength: 200,
+		}},
+	}
+	bs := &mockBodyStoreMap{
+		entries: map[string]*bodies.BodyEntry{
+			"legacy-buyerinfo.jsonl": {
+				ID:           id,
+				ResponseBody: json.RawMessage(`{"payload":{"BuyerEmail":"buyer@example.com","BuyerName":"Maria Schmidt","PurchaseOrderNumber":"PO-12345"}}`),
+			},
+		},
+	}
+
+	engine := pii.NewEngine(pii.NewRegistry())
+	h := NewHandlerWithPII(ls, &mockAuditStore{}, bs, engine)
+	mux := NewMux(h)
+
+	req := httptest.NewRequest("GET", "/api/v1/logs/"+id+"/body", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	respBody := rec.Body.String()
+	assert.NotContains(t, respBody, "Maria Schmidt")
+	assert.NotContains(t, respBody, "buyer@example.com")
+	assert.NotContains(t, respBody, "PO-12345")
+	assert.Contains(t, respBody, "redacted",
+		"full-body PII endpoints replace the entire response with the placeholder")
+}
+
 func TestHandleLogBody_NoEngine_BodyReturnedVerbatim(t *testing.T) {
 	ls := &mockLogStore{
 		logs: []*storage.RequestLog{{
