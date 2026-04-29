@@ -57,6 +57,12 @@ The dashboard (`SP_PROXY_PORT_DASHBOARD`, default `9090`) ships **without authen
 
 The dashboard now defaults to bind address `127.0.0.1` (`SP_PROXY_DASHBOARD_BIND_ADDR`). For container deployments, use a host-side `127.0.0.1:9090:9090` port mapping and set `SP_PROXY_DASHBOARD_BIND_ADDR=0.0.0.0` inside the container. The container will emit a `dpp_compliance_warning` audit event indicating that an authenticating reverse proxy must front the host port; this is the expected audit signal.
 
+The region (data-plane) listeners now default to bind address `127.0.0.1` (`SP_PROXY_REGION_BIND_ADDR`) for the same reason. **Upgrade note for non-compose deployments:** the previous binary listened on `0.0.0.0` for the region ports unconditionally. Operators upgrading from a pre-F-01 release who reach the region ports via a LAN, VPN, or external load balancer must explicitly opt in by setting `SP_PROXY_REGION_BIND_ADDR=0.0.0.0` (or a specific interface address). The reference `docker-compose.yml` already sets `SP_PROXY_REGION_BIND_ADDR=0.0.0.0` inside the container alongside host-side `127.0.0.1:port` mappings; deployments based on it are unaffected.
+
+### Migration 007 rollback note
+
+The 0.x release that lands the F-02 work introduces a SQLite migration (`007_pii_redacted_split.sql`) that splits the legacy `pii_redacted` column into `pii_redacted_request` + `pii_redacted_response`. The new binary writes only the new columns and leaves `pii_redacted` static at its backfilled value. **An operator who rolls back to a pre-F-02 binary after migration 007 has been applied will see `piiRedacted=false` in the dashboard for any rows written by the new binary**, regardless of whether the response was actually redacted. The data on disk is correct (the new columns hold the truth) -- only the pre-F-02 binary cannot see it. If a rollback is necessary, the safe window is: roll back before any meaningful traffic has been processed by the new binary.
+
 For the full DPP/AUP compliance reference -- shared-responsibility matrix, audit-prep checklist, and operator-specific touch points -- see [docs/DPP_COMPLIANCE.md](docs/DPP_COMPLIANCE.md).
 
 ---

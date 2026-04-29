@@ -216,6 +216,7 @@ All configuration is via environment variables. See [`deploy/example.env`](deplo
 | `SP_PROXY_SHUTDOWN_TIMEOUT` | `30s` | Graceful shutdown timeout |
 | `SP_PROXY_DASHBOARD_BIND_ADDR` | `127.0.0.1` | Bind address for the dashboard listener. Use `0.0.0.0` only when running in a container with host-side `127.0.0.1` port mapping in front. |
 | `SP_PROXY_REGION_BIND_ADDR` | `127.0.0.1` | Bind address for the region (data-plane) listeners. Default loopback-only matches the dashboard's pattern -- the proxy reads `X-SP-Proxy-Merchant-Id` without authentication, so any reachable client can self-claim any merchant identity. Use `0.0.0.0` only in a container with a host-side `127.0.0.1:port` mapping, or when direct external access is the operator's deliberate choice. |
+| `SP_PROXY_STRICT_MERCHANT` | `false` | When `true`, requests that supply neither `X-SP-Proxy-Merchant-Id` nor `X-Amz-Access-Token` are rejected with 400 instead of being merged into the shared empty-token-hash bucket (where they would share cache + rate-limit state with all other anonymous callers). Recommended for any deployment that does not have a documented anonymous-probe use case. |
 
 ### Rate Limiting
 
@@ -235,6 +236,7 @@ All configuration is via environment variables. See [`deploy/example.env`](deplo
 | `SP_PROXY_CACHE_ENABLED` | `true` | Enable response caching |
 | `SP_PROXY_CACHE_MAX_MEMORY` | `268435456` | Max cache memory in bytes (256 MB) |
 | `SP_PROXY_CACHE_DEFAULT_TTL` | `60s` | Default cache TTL |
+| `SP_PROXY_CACHE_MAX_CLIENT_TTL` | `24h` | Upper bound on caller-supplied `X-SP-Proxy-Cache-TTL` / `X-SP-Proxy-Cache-Until` headers. The tier default is operator-trusted and is NOT clamped. |
 | `SP_PROXY_CACHE_EXCLUDE_PII` | `true` | Exclude PII-containing responses from cache |
 
 ### Auto-RDT

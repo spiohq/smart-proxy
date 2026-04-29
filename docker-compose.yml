@@ -19,11 +19,12 @@ services:
       - deploy/example.env
     environment:
       # Inside the container, bind to all interfaces so Docker's port-forward
-      # works. The host-side 127.0.0.1 mapping above enforces the loopback
-      # restriction. The container will emit a dpp_compliance_warning audit
-      # event because of the non-loopback bind; this is the expected audit
-      # signal that an authenticating reverse proxy must front the host port.
+      # works. The host-side 127.0.0.1 mappings above enforce the loopback
+      # restriction. The container emits dpp_compliance_warning audit events
+      # for both non-loopback binds; that is the expected audit signal that
+      # an authenticating reverse proxy must front the host ports.
       SP_PROXY_DASHBOARD_BIND_ADDR: "0.0.0.0"
+      SP_PROXY_REGION_BIND_ADDR: "0.0.0.0"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9090/_sp-proxy/health"]
       interval: 30s
