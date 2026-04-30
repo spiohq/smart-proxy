@@ -345,6 +345,28 @@ func validatePositiveDuration(name, val string) error {
 // Validate checks that the configuration is valid.
 // A port of 0 means "disabled"  -  at least one region must be enabled.
 func (c *Config) Validate() error {
+	if err := c.validateServer(); err != nil {
+		return err
+	}
+	if err := c.validateRateLimit(); err != nil {
+		return err
+	}
+	if err := c.validateCache(); err != nil {
+		return err
+	}
+	if c.Storage.Backend != "sqlite" {
+		return fmt.Errorf("unsupported storage backend: %s (only 'sqlite' supported)", c.Storage.Backend)
+	}
+	if err := c.validateBodies(); err != nil {
+		return err
+	}
+	if err := c.validatePurge(); err != nil {
+		return err
+	}
+	return c.validatePaths()
+}
+
+func (c *Config) validateServer() error {
 	s := c.Server
 	if s.PortEU <= 0 && s.PortNA <= 0 && s.PortFE <= 0 {
 		return fmt.Errorf("at least one proxy port must be enabled (non-zero)")
@@ -352,62 +374,79 @@ func (c *Config) Validate() error {
 	if s.PortDashboard <= 0 {
 		return fmt.Errorf("dashboard port must be set (SP_PROXY_PORT_DASHBOARD)")
 	}
+	return nil
+}
+
+func (c *Config) validateRateLimit() error {
 	if c.RateLimit.ThrottleFactor <= 0 || c.RateLimit.ThrottleFactor > 1.0 {
 		return fmt.Errorf("throttle factor must be in (0, 1.0], got %f", c.RateLimit.ThrottleFactor)
 	}
 	if c.RateLimit.QueueMaxDepth <= 0 {
 		return fmt.Errorf("queue max depth must be positive, got %d", c.RateLimit.QueueMaxDepth)
 	}
-	if err := validatePositiveDuration("SP_PROXY_BUCKET_TTL", c.RateLimit.BucketTTL); err != nil {
-		return err
+	return validatePositiveDuration("SP_PROXY_BUCKET_TTL", c.RateLimit.BucketTTL)
+}
+
+func (c *Config) validateCache() error {
+	if !c.Cache.Enabled {
+		return nil
 	}
-	if c.Cache.Enabled {
-		if c.Cache.MaxMemory <= 0 {
-			return fmt.Errorf("cache max memory must be positive, got %d", c.Cache.MaxMemory)
-		}
-		if err := validatePositiveDuration("SP_PROXY_CACHE_DEFAULT_TTL", c.Cache.DefaultTTL); err != nil {
-			return fmt.Errorf("invalid cache default TTL %q: %w", c.Cache.DefaultTTL, err)
-		}
+	if c.Cache.MaxMemory <= 0 {
+		return fmt.Errorf("cache max memory must be positive, got %d", c.Cache.MaxMemory)
 	}
-	if c.Storage.Backend != "sqlite" {
-		return fmt.Errorf("unsupported storage backend: %s (only 'sqlite' supported)", c.Storage.Backend)
+	if err := validatePositiveDuration("SP_PROXY_CACHE_DEFAULT_TTL", c.Cache.DefaultTTL); err != nil {
+		return fmt.Errorf("invalid cache default TTL %q: %w", c.Cache.DefaultTTL, err)
 	}
-	if c.Bodies.Enabled {
-		if err := validatePositiveDuration("SP_PROXY_BODIES_RECENT_MAX_AGE", c.Bodies.RecentMaxAge); err != nil {
-			return fmt.Errorf("invalid bodies recent max age %q: %w", c.Bodies.RecentMaxAge, err)
+	return nil
+}
+
+func (c *Config) validateBodies() error {
+	if !c.Bodies.Enabled {
+		return nil
+	}
+	if err := validatePositiveDuration("SP_PROXY_BODIES_RECENT_MAX_AGE", c.Bodies.RecentMaxAge); err != nil {
+		return fmt.Errorf("invalid bodies recent max age %q: %w", c.Bodies.RecentMaxAge, err)
+	}
+	if err := validatePositiveDuration("SP_PROXY_BODIES_ARCHIVE_MAX_AGE", c.Bodies.ArchiveMaxAge); err != nil {
+		return fmt.Errorf("invalid bodies archive max age %q: %w", c.Bodies.ArchiveMaxAge, err)
+	}
+	switch c.Bodies.Compression {
+	case "", "zstd", "gzip", "none":
+	default:
+		return fmt.Errorf("invalid SP_PROXY_BODIES_COMPRESSION %q (want zstd|gzip|none)", c.Bodies.Compression)
+	}
+	if c.Bodies.MaxCaptureSize <= 0 {
+		return fmt.Errorf("SP_PROXY_BODIES_MAX_CAPTURE_SIZE must be positive, got %d", c.Bodies.MaxCaptureSize)
+	}
+	if c.Bodies.MaxBytes < 0 {
+		return fmt.Errorf("SP_PROXY_BODIES_MAX_BYTES cannot be negative, got %d", c.Bodies.MaxBytes)
+	}
+	return c.validateBodiesBackend()
+}
+
+func (c *Config) validateBodiesBackend() error {
+	switch c.Bodies.Backend {
+	case "", "local":
+		return nil
+	case "s3":
+		if c.Bodies.S3.Bucket == "" {
+			return fmt.Errorf("SP_PROXY_S3_BUCKET is required when SP_PROXY_BODIES_BACKEND=s3")
 		}
-		if err := validatePositiveDuration("SP_PROXY_BODIES_ARCHIVE_MAX_AGE", c.Bodies.ArchiveMaxAge); err != nil {
-			return fmt.Errorf("invalid bodies archive max age %q: %w", c.Bodies.ArchiveMaxAge, err)
-		}
-		switch c.Bodies.Compression {
-		case "", "zstd", "gzip", "none":
+		switch c.Bodies.S3.SSE {
+		case "", "AES256", "aws:kms", "aws:kms:dsse":
 		default:
-			return fmt.Errorf("invalid SP_PROXY_BODIES_COMPRESSION %q (want zstd|gzip|none)", c.Bodies.Compression)
+			return fmt.Errorf("invalid SP_PROXY_S3_SSE %q (want AES256|aws:kms|aws:kms:dsse)", c.Bodies.S3.SSE)
 		}
-		if c.Bodies.MaxCaptureSize <= 0 {
-			return fmt.Errorf("SP_PROXY_BODIES_MAX_CAPTURE_SIZE must be positive, got %d", c.Bodies.MaxCaptureSize)
+		if c.IsProduction() && hasInsecureS3Endpoint(c.Bodies.S3.Endpoint) {
+			return fmt.Errorf("SP_PROXY_S3_ENDPOINT %q uses plain http; refuse to start in production (set SP_PROXY_ENV=development to override, or use https)", c.Bodies.S3.Endpoint)
 		}
-		if c.Bodies.MaxBytes < 0 {
-			return fmt.Errorf("SP_PROXY_BODIES_MAX_BYTES cannot be negative, got %d", c.Bodies.MaxBytes)
-		}
-		switch c.Bodies.Backend {
-		case "", "local":
-		case "s3":
-			if c.Bodies.S3.Bucket == "" {
-				return fmt.Errorf("SP_PROXY_S3_BUCKET is required when SP_PROXY_BODIES_BACKEND=s3")
-			}
-			switch c.Bodies.S3.SSE {
-			case "", "AES256", "aws:kms", "aws:kms:dsse":
-			default:
-				return fmt.Errorf("invalid SP_PROXY_S3_SSE %q (want AES256|aws:kms|aws:kms:dsse)", c.Bodies.S3.SSE)
-			}
-			if c.IsProduction() && hasInsecureS3Endpoint(c.Bodies.S3.Endpoint) {
-				return fmt.Errorf("SP_PROXY_S3_ENDPOINT %q uses plain http; refuse to start in production (set SP_PROXY_ENV=development to override, or use https)", c.Bodies.S3.Endpoint)
-			}
-		default:
-			return fmt.Errorf("invalid SP_PROXY_BODIES_BACKEND %q (want local|s3)", c.Bodies.Backend)
-		}
+		return nil
+	default:
+		return fmt.Errorf("invalid SP_PROXY_BODIES_BACKEND %q (want local|s3)", c.Bodies.Backend)
 	}
+}
+
+func (c *Config) validatePurge() error {
 	for _, d := range []struct{ name, val string }{
 		{"SP_PROXY_PURGE_METADATA_RETENTION", c.Purge.MetadataRetention},
 		{"SP_PROXY_PURGE_AUDIT_RETENTION", c.Purge.AuditRetention},
@@ -416,8 +455,12 @@ func (c *Config) Validate() error {
 			return err
 		}
 	}
-	// Validate parent directories exist
-	if dir := filepath.Dir(c.Storage.SQLitePath); c.Storage.SQLitePath != ":memory:" {
+	return nil
+}
+
+func (c *Config) validatePaths() error {
+	if c.Storage.SQLitePath != ":memory:" {
+		dir := filepath.Dir(c.Storage.SQLitePath)
 		if _, err := os.Stat(dir); err != nil {
 			return fmt.Errorf("SQLite path parent directory %q does not exist: %w", dir, err)
 		}
@@ -442,21 +485,34 @@ func (c *Config) IsProduction() bool {
 // In production these are upgraded to errors by Validate(); in development
 // they are advisory.
 func (c *Config) Warnings() []string {
-	var w []string
-	if c.Bodies.Enabled && c.Bodies.Backend == "s3" {
-		if hasInsecureS3Endpoint(c.Bodies.S3.Endpoint) {
-			w = append(w, fmt.Sprintf("SP_PROXY_S3_ENDPOINT %q uses plain http; SigV4 credentials and PII-redacted bodies travel unencrypted. Use https in production.", c.Bodies.S3.Endpoint))
-		}
-		if c.Bodies.S3.SSE == "" {
-			w = append(w, "SP_PROXY_S3_SSE is empty; relying on bucket-default encryption. Set SP_PROXY_S3_SSE=AES256 (or aws:kms) to enforce server-side encryption explicitly.")
-		}
-	}
-
+	w := c.s3Warnings()
 	if !c.IsProduction() {
 		return w
 	}
+	w = append(w, c.productionDPPWarnings()...)
+	w = append(w, c.productionBindWarnings()...)
+	return w
+}
 
-	// DPP/AUP warnings (production-only).
+// s3Warnings reports S3-related concerns that apply in any environment.
+func (c *Config) s3Warnings() []string {
+	if !c.Bodies.Enabled || c.Bodies.Backend != "s3" {
+		return nil
+	}
+	var w []string
+	if hasInsecureS3Endpoint(c.Bodies.S3.Endpoint) {
+		w = append(w, fmt.Sprintf("SP_PROXY_S3_ENDPOINT %q uses plain http; SigV4 credentials and PII-redacted bodies travel unencrypted. Use https in production.", c.Bodies.S3.Endpoint))
+	}
+	if c.Bodies.S3.SSE == "" {
+		w = append(w, "SP_PROXY_S3_SSE is empty; relying on bucket-default encryption. Set SP_PROXY_S3_SSE=AES256 (or aws:kms) to enforce server-side encryption explicitly.")
+	}
+	return w
+}
+
+// productionDPPWarnings reports DPP/AUP concerns that only matter when
+// SP_PROXY_ENV=production. Each warning maps to a specific DPP clause.
+func (c *Config) productionDPPWarnings() []string {
+	var w []string
 	if !c.PII.FailClosed {
 		w = append(w, "SP_PROXY_PII_FAIL_CLOSED=false in production: unknown SP-API endpoints will be logged unredacted, violating DPP §2.6.")
 	}
@@ -472,14 +528,29 @@ func (c *Config) Warnings() []string {
 	if d, err := time.ParseDuration(c.Purge.AuditRetention); err == nil && d < 12*30*24*time.Hour {
 		w = append(w, fmt.Sprintf("SP_PROXY_PURGE_AUDIT_RETENTION=%s is below 12 months in production: violates DPP §2.6 audit log retention.", c.Purge.AuditRetention))
 	}
-	if c.Server.DashboardBindAddr != "127.0.0.1" && c.Server.DashboardBindAddr != "::1" && c.Server.DashboardBindAddr != "localhost" {
+	return w
+}
+
+// productionBindWarnings flags non-loopback bind addresses in production.
+// Both the dashboard and the region listener trust upstream HTTP headers, so
+// reaching them from the open internet is treated as a misconfiguration.
+func (c *Config) productionBindWarnings() []string {
+	var w []string
+	if !isLoopbackBind(c.Server.DashboardBindAddr) {
 		w = append(w, fmt.Sprintf("SP_PROXY_DASHBOARD_BIND_ADDR=%q is non-loopback in production: ensure an authenticating reverse proxy is in front of the dashboard.", c.Server.DashboardBindAddr))
 	}
-	if c.Server.RegionBindAddr != "127.0.0.1" && c.Server.RegionBindAddr != "::1" && c.Server.RegionBindAddr != "localhost" {
+	if !isLoopbackBind(c.Server.RegionBindAddr) {
 		w = append(w, fmt.Sprintf("SP_PROXY_REGION_BIND_ADDR=%q is non-loopback in production: callers can reach the proxy without network-level access control. The proxy reads X-SP-Proxy-Merchant-Id without authentication and any reachable client can self-claim any merchant identity.", c.Server.RegionBindAddr))
 	}
-
 	return w
+}
+
+func isLoopbackBind(addr string) bool {
+	switch addr {
+	case "127.0.0.1", "::1", "localhost":
+		return true
+	}
+	return false
 }
 
 // hasInsecureS3Endpoint reports whether the configured endpoint is a plain-http URL.

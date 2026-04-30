@@ -332,16 +332,9 @@ func buildLogWhereClause(f LogFilter) (string, []any) {
 		clauses = append(clauses, `path LIKE ? ESCAPE '\'`)
 		args = append(args, escapeLikePrefix(f.Endpoint)+"%")
 	}
-	if f.Status != "" {
-		if len(f.Status) == 3 && f.Status[1:] == "xx" {
-			// Bucket match: "4xx" -> status_code between 400 and 499
-			digit := f.Status[0] - '0'
-			clauses = append(clauses, "status_code >= ? AND status_code < ?")
-			args = append(args, int(digit)*100, int(digit)*100+100)
-		} else {
-			clauses = append(clauses, "status_code = ?")
-			args = append(args, f.Status)
-		}
+	if statusClause, statusArgs := buildStatusClause(f.Status); statusClause != "" {
+		clauses = append(clauses, statusClause)
+		args = append(args, statusArgs...)
 	}
 	if f.CacheStatus != "" {
 		clauses = append(clauses, "cache_status = ?")
@@ -369,6 +362,20 @@ func buildLogWhereClause(f LogFilter) (string, []any) {
 		return "", nil
 	}
 	return " WHERE " + strings.Join(clauses, " AND "), args
+}
+
+// buildStatusClause translates the ?status= filter into SQL. Three-digit
+// codes match exactly; "Nxx" buckets expand to a range. Returns ("", nil)
+// for the empty filter so the caller can skip appending entirely.
+func buildStatusClause(status string) (string, []any) {
+	if status == "" {
+		return "", nil
+	}
+	if len(status) == 3 && status[1:] == "xx" {
+		digit := status[0] - '0'
+		return "status_code >= ? AND status_code < ?", []any{int(digit) * 100, int(digit)*100 + 100}
+	}
+	return "status_code = ?", []any{status}
 }
 
 // DistinctMerchants returns merchant keys matching the given prefix, ordered by most recent activity.

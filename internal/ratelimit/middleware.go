@@ -39,48 +39,11 @@ func RateLimitMiddleware(limiter *Limiter, cfg *config.RateLimitConfig) func(htt
 				return
 			}
 
-			// Check application-level rate limit first
-			if appBucket, appOk := limiter.GetAppBucket(method, endpoint); appOk {
-				appAllowed, appWait := appBucket.TryConsume()
-				if !appAllowed {
-					mode := resolveThrottleMode(r, m.Key, endpoint, cfg)
-					if mode == ThrottleModeReject {
-						w.Header().Set("Retry-After", fmt.Sprintf("%.1f", appWait.Seconds()))
-						http.Error(w, "Application rate limit exceeded", http.StatusTooManyRequests)
-						return
-					}
-					// For queue modes, wait for app-level token
-					queueStart := time.Now()
-					timeout := resolveTimeout(r, cfg)
-					ctx, cancel := context.WithTimeout(r.Context(), timeout)
-					defer cancel()
-					for {
-						appAllowed, appWait = appBucket.TryConsume()
-						if appAllowed {
-							break
-						}
-						select {
-						case <-ctx.Done():
-							queueWaitMs := time.Since(queueStart).Milliseconds()
-							w.Header().Set("X-SP-Proxy-Queued", "true")
-							w.Header().Set("X-SP-Proxy-Queue-Wait-Ms", fmt.Sprintf("%d", queueWaitMs))
-							if r.Context().Err() != nil {
-								w.Header().Set("X-SP-Proxy-Error-Reason", "client_disconnected_in_queue")
-								w.WriteHeader(499) // Client Closed Request
-								return
-							}
-							w.Header().Set("Retry-After", fmt.Sprintf("%.1f", appWait.Seconds()))
-							http.Error(w, "Application rate limit queue timeout", http.StatusTooManyRequests)
-							return
-						case <-time.After(appWait):
-						}
-					}
-					_ = queueStart // used for metrics if needed
-				}
+			if !waitForAppBucket(w, r, limiter, cfg, m.Key, method, endpoint) {
+				return
 			}
 
 			mode := resolveThrottleMode(r, m.Key, endpoint, cfg)
-
 			allowed, waitTime := bucket.TryConsume()
 			if allowed {
 				w.Header().Set("X-SP-Proxy-Queued", "false")
@@ -89,59 +52,107 @@ func RateLimitMiddleware(limiter *Limiter, cfg *config.RateLimitConfig) func(htt
 				return
 			}
 
-			queueStart := time.Now()
-
-			switch mode {
-			case ThrottleModeReject:
-				w.Header().Set("Retry-After", fmt.Sprintf("%.1f", waitTime.Seconds()))
-				http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
-
-			case ThrottleModeQueue:
-				err := limiter.EnqueueAndWait(r.Context(), m.Key, method, endpoint, r)
-				if err != nil {
-					queueWaitMs := time.Since(queueStart).Milliseconds()
-					w.Header().Set("X-SP-Proxy-Queued", "true")
-					w.Header().Set("X-SP-Proxy-Queue-Wait-Ms", fmt.Sprintf("%d", queueWaitMs))
-					if errors.Is(err, context.Canceled) {
-						w.Header().Set("X-SP-Proxy-Error-Reason", "client_disconnected_in_queue")
-						w.WriteHeader(499) // Client Closed Request
-						return
-					}
-					http.Error(w, "Queue full or timeout", http.StatusTooManyRequests)
-					return
-				}
-				w.Header().Set("X-SP-Proxy-Queued", "true")
-				w.Header().Set("X-SP-Proxy-Queue-Wait-Ms", fmt.Sprintf("%d", time.Since(queueStart).Milliseconds()))
-				w.Header().Set("X-SP-Proxy-Rate-Limit-Remaining", fmt.Sprintf("%.2f", bucket.Tokens()))
-				next.ServeHTTP(w, r)
-
-			case ThrottleModeQueueTimeout:
-				timeout := resolveTimeout(r, cfg)
-				ctx, cancel := context.WithTimeout(r.Context(), timeout)
-				defer cancel()
-				err := limiter.EnqueueAndWait(ctx, m.Key, method, endpoint, r)
-				if err != nil {
-					queueWaitMs := time.Since(queueStart).Milliseconds()
-					w.Header().Set("X-SP-Proxy-Queued", "true")
-					w.Header().Set("X-SP-Proxy-Queue-Wait-Ms", fmt.Sprintf("%d", queueWaitMs))
-					// Distinguish client disconnect from server-side queue timeout:
-					// r.Context() canceled = client gone; ctx deadline = our timeout fired.
-					if r.Context().Err() != nil {
-						w.Header().Set("X-SP-Proxy-Error-Reason", "client_disconnected_in_queue")
-						w.WriteHeader(499) // Client Closed Request
-						return
-					}
-					w.Header().Set("Retry-After", fmt.Sprintf("%.1f", waitTime.Seconds()))
-					http.Error(w, "Queue timeout", http.StatusTooManyRequests)
-					return
-				}
-				w.Header().Set("X-SP-Proxy-Queued", "true")
-				w.Header().Set("X-SP-Proxy-Queue-Wait-Ms", fmt.Sprintf("%d", time.Since(queueStart).Milliseconds()))
-				w.Header().Set("X-SP-Proxy-Rate-Limit-Remaining", fmt.Sprintf("%.2f", bucket.Tokens()))
-				next.ServeHTTP(w, r)
-			}
+			serveThrottled(w, r, next, limiter, cfg, mode, bucket, waitTime, m.Key, method, endpoint)
 		})
 	}
+}
+
+// waitForAppBucket consumes an application-level token, optionally waiting
+// for one when the configured throttle mode allows queueing. Returns false
+// when the request was already failed (rejected or timed out / disconnected),
+// in which case the caller must stop.
+func waitForAppBucket(w http.ResponseWriter, r *http.Request, limiter *Limiter, cfg *config.RateLimitConfig, merchantKey, method, endpoint string) bool {
+	appBucket, appOk := limiter.GetAppBucket(method, endpoint)
+	if !appOk {
+		return true
+	}
+	appAllowed, appWait := appBucket.TryConsume()
+	if appAllowed {
+		return true
+	}
+
+	mode := resolveThrottleMode(r, merchantKey, endpoint, cfg)
+	if mode == ThrottleModeReject {
+		w.Header().Set("Retry-After", fmt.Sprintf("%.1f", appWait.Seconds()))
+		http.Error(w, "Application rate limit exceeded", http.StatusTooManyRequests)
+		return false
+	}
+
+	queueStart := time.Now()
+	timeout := resolveTimeout(r, cfg)
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
+	defer cancel()
+	for {
+		appAllowed, appWait = appBucket.TryConsume()
+		if appAllowed {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			queueWaitMs := time.Since(queueStart).Milliseconds()
+			w.Header().Set("X-SP-Proxy-Queued", "true")
+			w.Header().Set("X-SP-Proxy-Queue-Wait-Ms", fmt.Sprintf("%d", queueWaitMs))
+			if r.Context().Err() != nil {
+				w.Header().Set("X-SP-Proxy-Error-Reason", "client_disconnected_in_queue")
+				w.WriteHeader(499) // Client Closed Request
+				return false
+			}
+			w.Header().Set("Retry-After", fmt.Sprintf("%.1f", appWait.Seconds()))
+			http.Error(w, "Application rate limit queue timeout", http.StatusTooManyRequests)
+			return false
+		case <-time.After(appWait):
+		}
+	}
+}
+
+// serveThrottled handles the per-merchant bucket-empty path: reject, queue,
+// or queue-with-timeout. It runs after waitForAppBucket has cleared the
+// application-level limit.
+func serveThrottled(w http.ResponseWriter, r *http.Request, next http.Handler, limiter *Limiter, cfg *config.RateLimitConfig, mode ThrottleMode, bucket *TokenBucket, waitTime time.Duration, merchantKey, method, endpoint string) {
+	queueStart := time.Now()
+	switch mode {
+	case ThrottleModeReject:
+		w.Header().Set("Retry-After", fmt.Sprintf("%.1f", waitTime.Seconds()))
+		http.Error(w, "Rate limit exceeded", http.StatusTooManyRequests)
+	case ThrottleModeQueue:
+		serveQueued(w, r, next, limiter, bucket, queueStart, r.Context(), merchantKey, method, endpoint, "")
+	case ThrottleModeQueueTimeout:
+		timeout := resolveTimeout(r, cfg)
+		ctx, cancel := context.WithTimeout(r.Context(), timeout)
+		defer cancel()
+		retryAfter := fmt.Sprintf("%.1f", waitTime.Seconds())
+		serveQueued(w, r, next, limiter, bucket, queueStart, ctx, merchantKey, method, endpoint, retryAfter)
+	}
+}
+
+// serveQueued enqueues the request and runs next on success. retryAfter is
+// non-empty only for queue-timeout mode (where the caller wants Retry-After
+// set on timeout responses); plain queue mode passes "".
+func serveQueued(w http.ResponseWriter, r *http.Request, next http.Handler, limiter *Limiter, bucket *TokenBucket, queueStart time.Time, ctx context.Context, merchantKey, method, endpoint, retryAfter string) {
+	err := limiter.EnqueueAndWait(ctx, merchantKey, method, endpoint, r)
+	if err != nil {
+		queueWaitMs := time.Since(queueStart).Milliseconds()
+		w.Header().Set("X-SP-Proxy-Queued", "true")
+		w.Header().Set("X-SP-Proxy-Queue-Wait-Ms", fmt.Sprintf("%d", queueWaitMs))
+		// Distinguish client disconnect from server-side queue timeout:
+		// r.Context() canceled = client gone; ctx deadline = our timeout fired.
+		if r.Context().Err() != nil || errors.Is(err, context.Canceled) {
+			w.Header().Set("X-SP-Proxy-Error-Reason", "client_disconnected_in_queue")
+			w.WriteHeader(499) // Client Closed Request
+			return
+		}
+		if retryAfter != "" {
+			w.Header().Set("Retry-After", retryAfter)
+			http.Error(w, "Queue timeout", http.StatusTooManyRequests)
+			return
+		}
+		http.Error(w, "Queue full or timeout", http.StatusTooManyRequests)
+		return
+	}
+	w.Header().Set("X-SP-Proxy-Queued", "true")
+	w.Header().Set("X-SP-Proxy-Queue-Wait-Ms", fmt.Sprintf("%d", time.Since(queueStart).Milliseconds()))
+	w.Header().Set("X-SP-Proxy-Rate-Limit-Remaining", fmt.Sprintf("%.2f", bucket.Tokens()))
+	next.ServeHTTP(w, r)
 }
 
 // resolveThrottleMode resolves the throttle mode for a request. The header

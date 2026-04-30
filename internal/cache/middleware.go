@@ -44,44 +44,21 @@ func CacheMiddleware(c Cache, tiers *TierClassifier, cfg *config.CacheConfig) fu
 			m := merchant.MerchantFromContext(r.Context())
 			tier := tiers.Classify(r.Method, r.URL.Path, r)
 
-			// Non-cacheable: CacheTierNever with no special reason
-			// This covers both "never-cache GETs" (feeds, notifications) and mutations (non-GET).
-			// Mutations trigger prefix-based invalidation before passing through.
-			if tier.Tier == CacheTierNever && tier.Reason == "" {
-				if r.Method != http.MethodGet {
-					InvalidateOnMutation(c, m.Key, r.Method, r.URL.Path)
+			if handleCachePreconditions(w, r, next, c, tier, cfg, m.Key) {
+				return
+			}
+
+			if r.Method == http.MethodPost {
+				if tier.BatchCacheable {
+					if bcfg := lookupBatchConfig(r.URL.Path); bcfg != nil {
+						handleBatchCache(w, r, next, c, tier, cfg, bcfg)
+						return
+					}
 				}
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// PII excluded (only when ExcludePII config is true)
-			if cfg.ExcludePII && tier.Reason == "PII_EXCLUDED" {
-				w.Header().Set("X-SP-Proxy-Cache", "PII_EXCLUDED")
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Cache bypass
-			if r.Header.Get("X-SP-Proxy-No-Cache") == "true" {
-				w.Header().Set("X-SP-Proxy-Cache", "BYPASS")
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// Batch-cacheable POST: delegate to per-element batch cache logic
-			if r.Method == http.MethodPost && tier.BatchCacheable {
-				bcfg := lookupBatchConfig(r.URL.Path)
-				if bcfg != nil {
-					handleBatchCache(w, r, next, c, tier, cfg, bcfg)
+				if tier.PostCacheable {
+					handlePostCache(w, r, next, c, tier, cfg)
 					return
 				}
-			}
-
-			// Single POST body-hash caching
-			if r.Method == http.MethodPost && tier.PostCacheable {
-				handlePostCache(w, r, next, c, tier, cfg)
-				return
 			}
 
 			// Standard GET cache key. Sanitize the client-supplied custom
@@ -93,56 +70,93 @@ func CacheMiddleware(c Cache, tiers *TierClassifier, cfg *config.CacheConfig) fu
 				sanitizeCacheKeySuffix(r.Header.Get("X-SP-Proxy-Cache-Key")),
 			)
 
-			// Cache lookup
-			cached, err := c.Get(r.Context(), key)
-			if err == nil && cached != nil {
-				age := time.Since(cached.CachedAt)
-				remaining := cached.TTL - age
-				for k, vals := range cached.Headers {
-					for _, v := range vals {
-						w.Header().Add(k, v)
-					}
-				}
-				w.Header().Set("X-SP-Proxy-Cache", "HIT")
-				w.Header().Set("X-SP-Proxy-Cache-Age", fmt.Sprintf("%d", int(age.Seconds())))
-				w.Header().Set("X-SP-Proxy-Cache-TTL-Remaining", fmt.Sprintf("%d", int(remaining.Seconds())))
-				if cached.SourceRequestID != "" {
-					w.Header().Set("X-SP-Proxy-Cache-Source-ID", cached.SourceRequestID)
-				}
-				w.WriteHeader(cached.StatusCode)
-				w.Write(cached.Body)
+			if cached, err := c.Get(r.Context(), key); err == nil && cached != nil {
+				serveCachedResponse(w, cached)
 				return
 			}
 
-			// Cache MISS  -  record response without writing through
-			rec := newResponseRecorder()
-			next.ServeHTTP(rec, r)
-
-			// Copy upstream headers to client
-			for k, vals := range rec.headers {
-				for _, v := range vals {
-					w.Header().Add(k, v)
-				}
-			}
-			// Set cache status header
-			w.Header().Set("X-SP-Proxy-Cache", "MISS")
-			w.WriteHeader(rec.statusCode)
-			w.Write(rec.body.Bytes())
-
-			// Cache 2xx responses
-			if rec.statusCode >= 200 && rec.statusCode < 300 {
-				ttl := resolveTTL(r, tier, cfg)
-				resp := &CachedResponse{
-					StatusCode:      rec.statusCode,
-					Headers:         rec.headers.Clone(),
-					Body:            rec.body.Bytes(),
-					CachedAt:        time.Now(),
-					TTL:             ttl,
-					SourceRequestID: RequestIDFromContext(r.Context()),
-				}
-				_ = c.Set(r.Context(), key, resp, ttl)
-			}
+			recordAndCache(w, r, next, c, key, tier, cfg)
 		})
+	}
+}
+
+// handleCachePreconditions runs the early-exit branches that decide a request
+// should bypass the cache entirely (non-cacheable tiers, PII exclusion,
+// explicit bypass header). Returns true when the response was already served
+// and the caller should stop.
+func handleCachePreconditions(w http.ResponseWriter, r *http.Request, next http.Handler, c Cache, tier TierConfig, cfg *config.CacheConfig, merchantKey string) bool {
+	// Non-cacheable: CacheTierNever with no special reason. Covers both
+	// "never-cache GETs" (feeds, notifications) and mutations (non-GET).
+	// Mutations trigger prefix-based invalidation before passing through.
+	if tier.Tier == CacheTierNever && tier.Reason == "" {
+		if r.Method != http.MethodGet {
+			InvalidateOnMutation(c, merchantKey, r.Method, r.URL.Path)
+		}
+		next.ServeHTTP(w, r)
+		return true
+	}
+
+	if cfg.ExcludePII && tier.Reason == "PII_EXCLUDED" {
+		w.Header().Set("X-SP-Proxy-Cache", "PII_EXCLUDED")
+		next.ServeHTTP(w, r)
+		return true
+	}
+
+	if r.Header.Get("X-SP-Proxy-No-Cache") == "true" {
+		w.Header().Set("X-SP-Proxy-Cache", "BYPASS")
+		next.ServeHTTP(w, r)
+		return true
+	}
+
+	return false
+}
+
+// serveCachedResponse writes a cached entry to the response writer along with
+// the X-SP-Proxy-Cache HIT/Age/TTL headers.
+func serveCachedResponse(w http.ResponseWriter, cached *CachedResponse) {
+	age := time.Since(cached.CachedAt)
+	remaining := cached.TTL - age
+	for k, vals := range cached.Headers {
+		for _, v := range vals {
+			w.Header().Add(k, v)
+		}
+	}
+	w.Header().Set("X-SP-Proxy-Cache", "HIT")
+	w.Header().Set("X-SP-Proxy-Cache-Age", fmt.Sprintf("%d", int(age.Seconds())))
+	w.Header().Set("X-SP-Proxy-Cache-TTL-Remaining", fmt.Sprintf("%d", int(remaining.Seconds())))
+	if cached.SourceRequestID != "" {
+		w.Header().Set("X-SP-Proxy-Cache-Source-ID", cached.SourceRequestID)
+	}
+	w.WriteHeader(cached.StatusCode)
+	w.Write(cached.Body)
+}
+
+// recordAndCache passes the request through, copies the upstream response to
+// the client, and stores 2xx responses in the cache.
+func recordAndCache(w http.ResponseWriter, r *http.Request, next http.Handler, c Cache, key string, tier TierConfig, cfg *config.CacheConfig) {
+	rec := newResponseRecorder()
+	next.ServeHTTP(rec, r)
+
+	for k, vals := range rec.headers {
+		for _, v := range vals {
+			w.Header().Add(k, v)
+		}
+	}
+	w.Header().Set("X-SP-Proxy-Cache", "MISS")
+	w.WriteHeader(rec.statusCode)
+	w.Write(rec.body.Bytes())
+
+	if rec.statusCode >= 200 && rec.statusCode < 300 {
+		ttl := resolveTTL(r, tier, cfg)
+		resp := &CachedResponse{
+			StatusCode:      rec.statusCode,
+			Headers:         rec.headers.Clone(),
+			Body:            rec.body.Bytes(),
+			CachedAt:        time.Now(),
+			TTL:             ttl,
+			SourceRequestID: RequestIDFromContext(r.Context()),
+		}
+		_ = c.Set(r.Context(), key, resp, ttl)
 	}
 }
 

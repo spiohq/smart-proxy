@@ -117,86 +117,93 @@ func classifyUpstreamError(err error) string {
 		return "unknown"
 	}
 
-	// Context cancellation / timeout
-	if errors.Is(err, context.DeadlineExceeded) {
-		return "upstream_timeout"
-	}
-	if errors.Is(err, context.Canceled) {
-		return "client_disconnected"
+	if reason, ok := classifyByErrorsIs(err); ok {
+		return reason
 	}
 
-	// Connection refused
-	if errors.Is(err, syscall.ECONNREFUSED) {
-		return "connection_refused"
-	}
-	// Connection reset
-	if errors.Is(err, syscall.ECONNRESET) {
-		return "connection_reset"
-	}
-
-	// URL parse errors
+	// URL parse errors: unwrap and continue classification.
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) {
 		if urlErr.Timeout() {
 			return "upstream_timeout"
 		}
-		// Unwrap and continue classification
 		err = urlErr.Err
 	}
 
-	// Net errors (DNS, dial, etc.)
-	var netErr *net.OpError
-	if errors.As(err, &netErr) {
-		if netErr.Timeout() {
-			return "upstream_timeout"
-		}
-		op := netErr.Op
-		if op == "dial" {
-			var dnsErr *net.DNSError
-			if errors.As(netErr.Err, &dnsErr) {
-				return "dns_resolution_failed"
-			}
-			return "connection_failed"
-		}
-		if op == "read" {
-			return "upstream_read_error"
-		}
-		if op == "write" {
-			return "upstream_write_error"
-		}
+	if reason, ok := classifyNetOrTLSError(err); ok {
+		return reason
 	}
 
-	// TLS errors
-	var tlsErr *tls.CertificateVerificationError
-	if errors.As(err, &tlsErr) {
-		return "tls_certificate_error"
-	}
-	var recordErr tls.RecordHeaderError
-	if errors.As(err, &recordErr) {
-		return "tls_handshake_error"
-	}
-
-	// EOF = connection closed unexpectedly
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		return "upstream_timeout"
 	}
 
-	s := err.Error()
-	if strings.Contains(s, "tls") || strings.Contains(s, "TLS") || strings.Contains(s, "certificate") {
-		return "tls_error"
+	return classifyByErrorString(err.Error())
+}
+
+// classifyByErrorsIs covers the sentinel-error cases where errors.Is matches
+// directly (context cancellation, ECONNREFUSED, ECONNRESET).
+func classifyByErrorsIs(err error) (string, bool) {
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "upstream_timeout", true
+	case errors.Is(err, context.Canceled):
+		return "client_disconnected", true
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "connection_refused", true
+	case errors.Is(err, syscall.ECONNRESET):
+		return "connection_reset", true
 	}
-	if strings.Contains(s, "timeout") || strings.Contains(s, "Timeout") {
-		return "upstream_timeout"
-	}
-	if strings.Contains(s, "EOF") {
-		return "upstream_closed_connection"
-	}
-	if strings.Contains(s, "connection reset") {
-		return "connection_reset"
-	}
-	if strings.Contains(s, "no such host") {
-		return "dns_resolution_failed"
+	return "", false
+}
+
+// classifyNetOrTLSError matches *net.OpError (DNS, dial, read, write) and
+// TLS handshake/certificate errors.
+func classifyNetOrTLSError(err error) (string, bool) {
+	var netErr *net.OpError
+	if errors.As(err, &netErr) {
+		if netErr.Timeout() {
+			return "upstream_timeout", true
+		}
+		switch netErr.Op {
+		case "dial":
+			var dnsErr *net.DNSError
+			if errors.As(netErr.Err, &dnsErr) {
+				return "dns_resolution_failed", true
+			}
+			return "connection_failed", true
+		case "read":
+			return "upstream_read_error", true
+		case "write":
+			return "upstream_write_error", true
+		}
 	}
 
+	var tlsErr *tls.CertificateVerificationError
+	if errors.As(err, &tlsErr) {
+		return "tls_certificate_error", true
+	}
+	var recordErr tls.RecordHeaderError
+	if errors.As(err, &recordErr) {
+		return "tls_handshake_error", true
+	}
+	return "", false
+}
+
+// classifyByErrorString is the fallback that inspects the error's textual
+// representation for cases we couldn't match structurally.
+func classifyByErrorString(s string) string {
+	switch {
+	case strings.Contains(s, "tls"), strings.Contains(s, "TLS"), strings.Contains(s, "certificate"):
+		return "tls_error"
+	case strings.Contains(s, "timeout"), strings.Contains(s, "Timeout"):
+		return "upstream_timeout"
+	case strings.Contains(s, "EOF"):
+		return "upstream_closed_connection"
+	case strings.Contains(s, "connection reset"):
+		return "connection_reset"
+	case strings.Contains(s, "no such host"):
+		return "dns_resolution_failed"
+	}
 	return "upstream_error"
 }
