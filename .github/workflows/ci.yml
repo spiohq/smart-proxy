@@ -14,6 +14,7 @@ permissions:
 jobs:
   lint:
     name: Lint (gofmt, go vet, gocyclo)
+    needs: web-build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -21,6 +22,12 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.6'
+
+      - name: Download dashboard assets
+        uses: actions/download-artifact@v5
+        with:
+          name: dashboard-assets
+          path: internal/dashboard/static/
 
       - name: gofmt -s
         run: |
