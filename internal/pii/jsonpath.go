@@ -61,12 +61,36 @@ func walkSegments(data interface{}, segments []string, fn func(parent map[string
 	seg := segments[0]
 	rest := segments[1:]
 
-	// Array wildcard segment
-	if seg == "[*]" {
-		arr, ok := data.([]interface{})
-		if !ok {
-			return false
+	if strings.HasPrefix(seg, "[") && strings.HasSuffix(seg, "]") {
+		return walkArraySegment(data, seg, rest, fn)
+	}
+
+	// Field segment.
+	obj, ok := data.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	if len(rest) == 0 {
+		if _, exists := obj[seg]; exists {
+			return fn(obj, seg)
 		}
+		return false
+	}
+	child, exists := obj[seg]
+	if !exists {
+		return false
+	}
+	return walkSegments(child, rest, fn)
+}
+
+// walkArraySegment handles "[*]" wildcard and "[N]" index segments. Returns
+// false when data is not an array or the index is out of range.
+func walkArraySegment(data interface{}, seg string, rest []string, fn func(parent map[string]interface{}, key string) bool) bool {
+	arr, ok := data.([]interface{})
+	if !ok {
+		return false
+	}
+	if seg == "[*]" {
 		found := false
 		for _, elem := range arr {
 			if walkSegments(elem, rest, fn) {
@@ -75,42 +99,12 @@ func walkSegments(data interface{}, segments []string, fn func(parent map[string
 		}
 		return found
 	}
-
-	// Array index segment
-	if strings.HasPrefix(seg, "[") && strings.HasSuffix(seg, "]") {
-		indexStr := seg[1 : len(seg)-1]
-		n, err := strconv.Atoi(indexStr)
-		if err != nil {
-			return false
-		}
-		arr, ok := data.([]interface{})
-		if !ok {
-			return false
-		}
-		if n < 0 || n >= len(arr) {
-			return false
-		}
-		return walkSegments(arr[n], rest, fn)
-	}
-
-	// Field segment
-	obj, ok := data.(map[string]interface{})
-	if !ok {
+	n, err := strconv.Atoi(seg[1 : len(seg)-1])
+	if err != nil {
 		return false
 	}
-
-	// Last segment: call fn if key exists
-	if len(rest) == 0 {
-		if _, exists := obj[seg]; exists {
-			return fn(obj, seg)
-		}
+	if n < 0 || n >= len(arr) {
 		return false
 	}
-
-	// Not last segment: descend into nested field
-	child, exists := obj[seg]
-	if !exists {
-		return false
-	}
-	return walkSegments(child, rest, fn)
+	return walkSegments(arr[n], rest, fn)
 }

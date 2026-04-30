@@ -328,7 +328,7 @@ func TestSQLiteStore_DistinctMerchants(t *testing.T) {
 		{"dm-2", "SELLER_ABC123"}, // duplicate merchant
 		{"dm-3", "SELLER_XYZ789"},
 		{"dm-4", "AGENCY_DEMO"},
-		{"dm-5", ""},              // empty merchant (should be excluded)
+		{"dm-5", ""}, // empty merchant (should be excluded)
 	} {
 		e := testRequestLog(m.id, m.merchant)
 		e.Timestamp = now.Add(time.Duration(i) * time.Second)
@@ -521,11 +521,11 @@ func TestQueryLogs_LikeWildcardInputIsEscaped(t *testing.T) {
 
 func TestEscapeLikePrefix_HandlesAllSpecials(t *testing.T) {
 	cases := map[string]string{
-		"plain":    "plain",
-		"a%b":      `a\%b`,
-		"a_b":      `a\_b`,
-		`a\b`:      `a\\b`,
-		"%_\\mix":  `\%\_\\mix`,
+		"plain":   "plain",
+		"a%b":     `a\%b`,
+		"a_b":     `a\_b`,
+		`a\b`:     `a\\b`,
+		"%_\\mix": `\%\_\\mix`,
 	}
 	for in, want := range cases {
 		t.Run(in, func(t *testing.T) {

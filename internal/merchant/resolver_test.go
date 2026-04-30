@@ -215,6 +215,6 @@ type responseRecorder struct {
 
 func newResponseRecorder() *responseRecorder { return &responseRecorder{code: http.StatusOK} }
 
-func (r *responseRecorder) Header() http.Header        { return http.Header{} }
+func (r *responseRecorder) Header() http.Header         { return http.Header{} }
 func (r *responseRecorder) Write(b []byte) (int, error) { return len(b), nil }
 func (r *responseRecorder) WriteHeader(statusCode int)  { r.code = statusCode }

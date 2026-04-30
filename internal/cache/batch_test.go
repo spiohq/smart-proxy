@@ -320,15 +320,15 @@ func feesBatchRequest(ids ...string) string {
 		ListingPrice listingPrice `json:"ListingPrice"`
 	}
 	type fer struct {
-		MarketplaceId     string         `json:"MarketplaceId"`
-		IsAmazonFulfilled bool           `json:"IsAmazonFulfilled"`
+		MarketplaceId       string          `json:"MarketplaceId"`
+		IsAmazonFulfilled   bool            `json:"IsAmazonFulfilled"`
 		PriceToEstimateFees priceToEstimate `json:"PriceToEstimateFees"`
-		Identifier        string         `json:"Identifier"`
+		Identifier          string          `json:"Identifier"`
 	}
 	type elem struct {
-		IdType           string `json:"IdType"`
-		IdValue          string `json:"IdValue"`
-		FeesEstimateRequest fer  `json:"FeesEstimateRequest"`
+		IdType              string `json:"IdType"`
+		IdValue             string `json:"IdValue"`
+		FeesEstimateRequest fer    `json:"FeesEstimateRequest"`
 	}
 
 	elements := make([]elem, len(ids))
@@ -352,7 +352,7 @@ func feesBatchRequest(ids ...string) string {
 
 func feesBatchResponse(ids ...string) string {
 	type respElem struct {
-		Status string `json:"Status"`
+		Status                 string `json:"Status"`
 		FeesEstimateIdentifier struct {
 			IdValue string `json:"IdValue"`
 		} `json:"FeesEstimateIdentifier"`
@@ -892,7 +892,7 @@ func TestBatchCache_HitHeaders(t *testing.T) {
 func TestBatchCache_Fees_ErrorElementSkipped(t *testing.T) {
 	// Build a fees response where one element is Success, one is ClientError
 	type feesElem struct {
-		Status                  string `json:"Status"`
+		Status                 string `json:"Status"`
 		FeesEstimateIdentifier struct {
 			IdValue string `json:"IdValue"`
 		} `json:"FeesEstimateIdentifier"`

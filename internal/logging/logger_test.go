@@ -212,16 +212,16 @@ func TestAsyncLogger_PIIRedaction(t *testing.T) {
 	// PII endpoint  -  body should be redacted before storage
 	logger.Log(&LogEntry{
 		Meta: &storage.RequestLog{
-			ID:          "pii-001",
-			Timestamp:   time.Now().UTC(),
-			MerchantKey: "merchant-a",
-			Method:      "GET",
-			Path:        "/orders/v0/orders",
-			StatusCode:  200,
+			ID:                  "pii-001",
+			Timestamp:           time.Now().UTC(),
+			MerchantKey:         "merchant-a",
+			Method:              "GET",
+			Path:                "/orders/v0/orders",
+			StatusCode:          200,
 			PIIRedactedResponse: true,
 		},
 		Body: &bodies.BodyEntry{
-			ID: "pii-001",
+			ID:           "pii-001",
 			ResponseBody: json.RawMessage(`{"payload":{"Orders":[{"BuyerInfo":{"BuyerEmail":"secret@test.com"},"OrderId":"111"}]}}`),
 		},
 	})
@@ -271,12 +271,12 @@ func TestAsyncLogger_FullBodyPIIEndpoint(t *testing.T) {
 	// Full-body PII endpoint (e.g., /orders/v0/orders/{orderId}/buyerInfo)
 	logger.Log(&LogEntry{
 		Meta: &storage.RequestLog{
-			ID:          "fullpii-001",
-			Timestamp:   time.Now().UTC(),
-			MerchantKey: "merchant-a",
-			Method:      "GET",
-			Path:        "/orders/v0/orders/123/buyerInfo",
-			StatusCode:  200,
+			ID:                  "fullpii-001",
+			Timestamp:           time.Now().UTC(),
+			MerchantKey:         "merchant-a",
+			Method:              "GET",
+			Path:                "/orders/v0/orders/123/buyerInfo",
+			StatusCode:          200,
 			PIIRedactedResponse: true,
 		},
 		Body: &bodies.BodyEntry{

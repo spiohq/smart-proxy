@@ -21,11 +21,11 @@ import (
 // directly, then assert the header survives serialization.
 func TestS3Integration_NewS3PropagatesSSEHeader(t *testing.T) {
 	tests := []struct {
-		name        string
-		sse         string
-		kmsKeyID    string
-		wantSSE     string
-		wantKMSKey  string
+		name       string
+		sse        string
+		kmsKeyID   string
+		wantSSE    string
+		wantKMSKey string
 	}{
 		{name: "no SSE configured -> no header", sse: "", wantSSE: ""},
 		{name: "AES256", sse: "AES256", wantSSE: "AES256"},

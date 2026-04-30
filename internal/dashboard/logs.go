@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/spiohq/smart-proxy/internal/bodies"
 	"github.com/spiohq/smart-proxy/internal/endpoint"
 	"github.com/spiohq/smart-proxy/internal/storage"
 )
@@ -272,39 +273,7 @@ func (h *Handler) handleLogBody(w http.ResponseWriter, r *http.Request) {
 	// when the metadata flag is misleading. After F-02 this is mostly
 	// belt-and-suspenders against future write-side bugs.
 	if h.piiEngine != nil {
-		classified := endpoint.Classify(entry.Path)
-		reg := h.piiEngine.Registry()
-
-		// Response side: same logic the async logger uses.
-		if body.ResponseBody != nil {
-			if reg.IsFullBodyPII(classified) {
-				body.ResponseBody = json.RawMessage(h.piiEngine.RedactFullBody(classified))
-			} else {
-				redacted, _ := h.piiEngine.RedactForLogging(classified, []byte(body.ResponseBody))
-				body.ResponseBody = json.RawMessage(redacted)
-			}
-		}
-
-		// Request side: only fires for non-GET methods. The engine's
-		// RedactRequestBodyForLogging needs the action-specific pattern for
-		// messaging POST endpoints; the dashboard does not have access to
-		// the original *http.Request, so we reconstruct the lookup using
-		// the stored Method+Path. RequestBodyPattern handles this method-aware
-		// lookup correctly.
-		if body.RequestBody != nil && entry.Method != "" && entry.Method != http.MethodGet {
-			// Build a synthetic request to drive RequestBodyPattern.
-			synth := &http.Request{Method: entry.Method, URL: mustURL(entry.Path)}
-			reqPattern := reg.RequestBodyPattern(synth)
-			if reqPattern != "" {
-				redacted, ok := h.piiEngine.RedactRequestBodyForLogging(reqPattern, []byte(body.RequestBody))
-				if ok {
-					body.RequestBody = json.RawMessage(redacted)
-				} else if reg.IsFullBodyPII(classified) {
-					// Fail-closed unknown path: same fallback as the async logger.
-					body.RequestBody = json.RawMessage(h.piiEngine.RedactFullBody(reqPattern))
-				}
-			}
-		}
+		h.redactStoredBody(body, entry)
 	}
 
 	resp := map[string]json.RawMessage{
@@ -312,6 +281,45 @@ func (h *Handler) handleLogBody(w http.ResponseWriter, r *http.Request) {
 		"responseBody": body.ResponseBody,
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// redactStoredBody re-runs the PII engine on both directions of a stored
+// request/response pair before returning it to the dashboard caller. See the
+// call site for the F-02 / F-15 motivation.
+func (h *Handler) redactStoredBody(body *bodies.BodyEntry, entry *storage.RequestLog) {
+	classified := endpoint.Classify(entry.Path)
+	reg := h.piiEngine.Registry()
+
+	// Response side: same logic the async logger uses.
+	if body.ResponseBody != nil {
+		if reg.IsFullBodyPII(classified) {
+			body.ResponseBody = json.RawMessage(h.piiEngine.RedactFullBody(classified))
+		} else {
+			redacted, _ := h.piiEngine.RedactForLogging(classified, []byte(body.ResponseBody))
+			body.ResponseBody = json.RawMessage(redacted)
+		}
+	}
+
+	// Request side: only fires for non-GET methods. The engine's
+	// RedactRequestBodyForLogging needs the action-specific pattern for
+	// messaging POST endpoints; the dashboard does not have access to
+	// the original *http.Request, so we reconstruct the lookup using
+	// the stored Method+Path. RequestBodyPattern handles this method-aware
+	// lookup correctly.
+	if body.RequestBody == nil || entry.Method == "" || entry.Method == http.MethodGet {
+		return
+	}
+	synth := &http.Request{Method: entry.Method, URL: mustURL(entry.Path)}
+	reqPattern := reg.RequestBodyPattern(synth)
+	if reqPattern == "" {
+		return
+	}
+	if redacted, ok := h.piiEngine.RedactRequestBodyForLogging(reqPattern, []byte(body.RequestBody)); ok {
+		body.RequestBody = json.RawMessage(redacted)
+	} else if reg.IsFullBodyPII(classified) {
+		// Fail-closed unknown path: same fallback as the async logger.
+		body.RequestBody = json.RawMessage(h.piiEngine.RedactFullBody(reqPattern))
+	}
 }
 
 // mustURL parses a stored path into a minimal *url.URL for use as a synthetic

@@ -10,24 +10,24 @@ import (
 // tax info, or customer invoicing data.
 var restrictedReportTypes = map[string]bool{
 	// Order reports with PII suffixes
-	"GET_FLAT_FILE_ORDER_REPORT_DATA_SHIPPING":            true,
-	"GET_FLAT_FILE_ORDER_REPORT_DATA_INVOICING":           true,
-	"GET_FLAT_FILE_ORDER_REPORT_DATA_TAX":                 true,
-	"GET_ORDER_REPORT_DATA_SHIPPING":                      true,
-	"GET_ORDER_REPORT_DATA_INVOICING":                     true,
-	"GET_ORDER_REPORT_DATA_TAX":                           true,
-	"GET_FLAT_FILE_ACTIONABLE_ORDER_DATA_SHIPPING":        true,
-	"GET_FLAT_FILE_ACTIONABLE_ORDER_DATA_INVOICING":       true,
-	"GET_FLAT_FILE_ACTIONABLE_ORDER_DATA_TAX":             true,
-	"GET_CONVERGED_FLAT_FILE_ORDER_REPORT_DATA":           true,
+	"GET_FLAT_FILE_ORDER_REPORT_DATA_SHIPPING":      true,
+	"GET_FLAT_FILE_ORDER_REPORT_DATA_INVOICING":     true,
+	"GET_FLAT_FILE_ORDER_REPORT_DATA_TAX":           true,
+	"GET_ORDER_REPORT_DATA_SHIPPING":                true,
+	"GET_ORDER_REPORT_DATA_INVOICING":               true,
+	"GET_ORDER_REPORT_DATA_TAX":                     true,
+	"GET_FLAT_FILE_ACTIONABLE_ORDER_DATA_SHIPPING":  true,
+	"GET_FLAT_FILE_ACTIONABLE_ORDER_DATA_INVOICING": true,
+	"GET_FLAT_FILE_ACTIONABLE_ORDER_DATA_TAX":       true,
+	"GET_CONVERGED_FLAT_FILE_ORDER_REPORT_DATA":     true,
 	// FBA shipments with PII
 	"GET_AMAZON_FULFILLED_SHIPMENTS_DATA_INVOICING": true,
 	"GET_AMAZON_FULFILLED_SHIPMENTS_DATA_TAX":       true,
 	// Tax and invoicing reports
-	"GET_EASYSHIP_DOCUMENTS":  true,
-	"GET_GST_MTR_B2B_CUSTOM":  true,
+	"GET_EASYSHIP_DOCUMENTS":   true,
+	"GET_GST_MTR_B2B_CUSTOM":   true,
 	"GET_VAT_TRANSACTION_DATA": true,
-	"SC_VAT_TAX_REPORT":       true,
+	"SC_VAT_TAX_REPORT":        true,
 }
 
 // IsRestrictedReportType returns true if the given reportType requires an RDT

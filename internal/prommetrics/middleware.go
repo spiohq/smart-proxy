@@ -16,93 +16,98 @@ func Middleware(m *Metrics, region string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
-
-			// Wrap response writer to capture status code and bytes written.
 			rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
-
 			next.ServeHTTP(rw, r)
 
-			duration := time.Since(start).Seconds()
-
-			// Extract labels.
-			merch := merchant.MerchantFromContext(r.Context())
-			merchantKey := merch.Key
-			ep := endpoint.Classify(r.URL.Path)
-			method := r.Method
-			statusCode := strconv.Itoa(rw.statusCode)
-			cacheStatus := rw.Header().Get("X-SP-Proxy-Cache")
-			if cacheStatus == "" {
-				cacheStatus = "NONE"
-			}
-
-			// Request counter.
-			m.RequestsTotal.WithLabelValues(merchantKey, ep, region, method, statusCode, cacheStatus).Inc()
-
-			// Total duration.
-			m.RequestDuration.WithLabelValues(merchantKey, ep, region, method).Observe(duration)
-
-			// Upstream duration (exclude queue wait).
-			queueWaitMs := int64(0)
-			if qw := rw.Header().Get("X-SP-Proxy-Queue-Wait-Ms"); qw != "" {
-				if parsed, err := strconv.ParseInt(qw, 10, 64); err == nil {
-					queueWaitMs = parsed
-				}
-			}
-			upstreamDuration := duration - float64(queueWaitMs)/1000.0
-			if upstreamDuration < 0 {
-				upstreamDuration = 0
-			}
-			// Only record upstream duration for non-cache-hits (cache hits don't go upstream).
-			if cacheStatus != "HIT" {
-				m.UpstreamDuration.WithLabelValues(merchantKey, ep, region, method).Observe(upstreamDuration)
-			}
-
-			// Body sizes.
-			if r.ContentLength > 0 {
-				m.RequestSizeBytes.WithLabelValues(merchantKey, ep, region, method).Observe(float64(r.ContentLength))
-			}
-			if rw.bytesWritten > 0 {
-				m.ResponseSizeBytes.WithLabelValues(merchantKey, ep, region, method).Observe(float64(rw.bytesWritten))
-			}
-
-			// Rate limit queue metrics.
-			if rw.Header().Get("X-SP-Proxy-Queued") == "true" {
-				m.RateLimitQueued.WithLabelValues(merchantKey, ep, region).Inc()
-				if queueWaitMs > 0 {
-					m.RateLimitQueueDuration.WithLabelValues(merchantKey, ep, region).Observe(float64(queueWaitMs) / 1000.0)
-				}
-			}
-
-			// Rate limit rejection: proxy-generated 429 (no upstream request).
-			// We detect this by checking if it's a 429 AND cache status is NONE (not from upstream).
-			if rw.statusCode == http.StatusTooManyRequests && cacheStatus == "NONE" {
-				m.RateLimitRejected.WithLabelValues(merchantKey, ep, region).Inc()
-			}
-
-			// Cache hit/miss.
-			switch cacheStatus {
-			case "HIT":
-				m.CacheHitsTotal.WithLabelValues(merchantKey, ep, region).Inc()
-			case "MISS", "BYPASS", "PII_EXCLUDED":
-				m.CacheMissesTotal.WithLabelValues(merchantKey, ep, region).Inc()
-			}
-
-			// Upstream errors (5xx from Amazon  -  only when not a cache hit).
-			if cacheStatus != "HIT" && rw.statusCode >= 500 {
-				m.UpstreamErrorsTotal.WithLabelValues(merchantKey, ep, region).Inc()
-			}
-
-			// Upstream throttles (429 from Amazon  -  when we did go upstream).
-			if cacheStatus != "HIT" && cacheStatus != "NONE" && rw.statusCode == http.StatusTooManyRequests {
-				// This 429 came from upstream, not from our rate limiter.
-				m.UpstreamThrottlesTotal.WithLabelValues(merchantKey, ep, region).Inc()
-			}
-
-			// PII redaction.
-			if rw.Header().Get("X-SP-Proxy-PII-Redacted") == "true" {
-				m.PIIRedactionsTotal.WithLabelValues(merchantKey, ep, region).Inc()
-			}
+			recordRequestMetrics(m, region, r, rw, time.Since(start).Seconds())
 		})
+	}
+}
+
+// recordRequestMetrics emits all per-request Prometheus observations after
+// the downstream handler has finished. Split out from Middleware so the
+// hot path stays under gocyclo's complexity threshold.
+func recordRequestMetrics(m *Metrics, region string, r *http.Request, rw *responseWriter, duration float64) {
+	merchantKey := merchant.MerchantFromContext(r.Context()).Key
+	ep := endpoint.Classify(r.URL.Path)
+	method := r.Method
+	statusCode := strconv.Itoa(rw.statusCode)
+	cacheStatus := rw.Header().Get("X-SP-Proxy-Cache")
+	if cacheStatus == "" {
+		cacheStatus = "NONE"
+	}
+
+	m.RequestsTotal.WithLabelValues(merchantKey, ep, region, method, statusCode, cacheStatus).Inc()
+	m.RequestDuration.WithLabelValues(merchantKey, ep, region, method).Observe(duration)
+
+	queueWaitMs := parseQueueWaitMs(rw.Header().Get("X-SP-Proxy-Queue-Wait-Ms"))
+	upstreamDuration := duration - float64(queueWaitMs)/1000.0
+	if upstreamDuration < 0 {
+		upstreamDuration = 0
+	}
+	if cacheStatus != "HIT" {
+		m.UpstreamDuration.WithLabelValues(merchantKey, ep, region, method).Observe(upstreamDuration)
+	}
+
+	if r.ContentLength > 0 {
+		m.RequestSizeBytes.WithLabelValues(merchantKey, ep, region, method).Observe(float64(r.ContentLength))
+	}
+	if rw.bytesWritten > 0 {
+		m.ResponseSizeBytes.WithLabelValues(merchantKey, ep, region, method).Observe(float64(rw.bytesWritten))
+	}
+
+	recordRateLimitMetrics(m, merchantKey, ep, region, rw, cacheStatus, queueWaitMs)
+	recordCacheAndUpstreamMetrics(m, merchantKey, ep, region, rw, cacheStatus)
+
+	if rw.Header().Get("X-SP-Proxy-PII-Redacted") == "true" {
+		m.PIIRedactionsTotal.WithLabelValues(merchantKey, ep, region).Inc()
+	}
+}
+
+// parseQueueWaitMs extracts the queue-wait duration written by the rate-limit
+// middleware. Returns 0 when the header is absent or unparseable.
+func parseQueueWaitMs(header string) int64 {
+	if header == "" {
+		return 0
+	}
+	parsed, err := strconv.ParseInt(header, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return parsed
+}
+
+// recordRateLimitMetrics emits queue-depth and rejection counters. Proxy-
+// generated 429s (cache status NONE) are distinguished from upstream throttles
+// by inspecting the X-SP-Proxy-Cache header.
+func recordRateLimitMetrics(m *Metrics, merchantKey, ep, region string, rw *responseWriter, cacheStatus string, queueWaitMs int64) {
+	if rw.Header().Get("X-SP-Proxy-Queued") == "true" {
+		m.RateLimitQueued.WithLabelValues(merchantKey, ep, region).Inc()
+		if queueWaitMs > 0 {
+			m.RateLimitQueueDuration.WithLabelValues(merchantKey, ep, region).Observe(float64(queueWaitMs) / 1000.0)
+		}
+	}
+	if rw.statusCode == http.StatusTooManyRequests && cacheStatus == "NONE" {
+		m.RateLimitRejected.WithLabelValues(merchantKey, ep, region).Inc()
+	}
+}
+
+// recordCacheAndUpstreamMetrics emits cache hit/miss counters and the
+// upstream error / throttle counters. Cache hits never reach upstream, so
+// they are excluded from upstream-error attribution.
+func recordCacheAndUpstreamMetrics(m *Metrics, merchantKey, ep, region string, rw *responseWriter, cacheStatus string) {
+	switch cacheStatus {
+	case "HIT":
+		m.CacheHitsTotal.WithLabelValues(merchantKey, ep, region).Inc()
+	case "MISS", "BYPASS", "PII_EXCLUDED":
+		m.CacheMissesTotal.WithLabelValues(merchantKey, ep, region).Inc()
+	}
+	if cacheStatus != "HIT" && rw.statusCode >= 500 {
+		m.UpstreamErrorsTotal.WithLabelValues(merchantKey, ep, region).Inc()
+	}
+	if cacheStatus != "HIT" && cacheStatus != "NONE" && rw.statusCode == http.StatusTooManyRequests {
+		// This 429 came from upstream, not from our rate limiter.
+		m.UpstreamThrottlesTotal.WithLabelValues(merchantKey, ep, region).Inc()
 	}
 }
 

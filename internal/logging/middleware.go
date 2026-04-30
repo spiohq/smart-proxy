@@ -36,10 +36,8 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			startTime := time.Now().UTC()
 
-			// Generate request ID and store in context for cache middleware
 			requestID := GenerateRequestID()
-			ctx := cache.ContextWithRequestID(r.Context(), requestID)
-			r = r.WithContext(ctx)
+			r = r.WithContext(cache.ContextWithRequestID(r.Context(), requestID))
 
 			// Prepare a context slot for the rich internal upstream-error
 			// classification (F-16). The proxy's ErrorHandler writes into
@@ -47,127 +45,142 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 			// only the coarse externally-safe value.
 			r, getInternalErrorReason := proxy.PrepareInternalErrorReason(r)
 
-			// Wrap response writer to capture status + body
 			capture := NewResponseCapture(w, int(maxCaptureSize))
+			requestBody := captureRequestBody(r, maxCaptureSize)
 
-			// Capture request body for mutations (POST/PUT/PATCH)
-			var requestBody []byte
-			if r.Body != nil && r.ContentLength > 0 && r.ContentLength <= maxCaptureSize {
-				switch r.Method {
-				case http.MethodPost, http.MethodPut, http.MethodPatch:
-					requestBody, _ = io.ReadAll(io.LimitReader(r.Body, maxCaptureSize))
-					r.Body.Close()
-					r.Body = io.NopCloser(bytes.NewReader(requestBody))
-				}
-			}
-
-			// Serve the request through the rest of the chain
 			next.ServeHTTP(capture, r)
 
-			// Skip logging if the client disconnected  -  the request never
+			// Skip logging if the client disconnected - the request never
 			// reached upstream and the log entry would just be noise.
 			if capture.Header().Get("X-SP-Proxy-Error-Reason") == "client_disconnected" {
 				return
 			}
 
-			// Build metadata
-			totalLatency := time.Since(startTime).Milliseconds()
-			m := merchant.MerchantFromContext(r.Context())
-			cacheStatus := capture.Header().Get("X-SP-Proxy-Cache")
-
-			reqHeaders := headerToMap(pii.RedactHeaders(r.Header))
-			// Response headers go through the same SensitiveHeaders filter
-			// as request headers (F-12). Amazon does not normally emit
-			// session-bearing values, but the symmetry is defensive.
-			respHeaders := headerToMap(pii.RedactHeaders(capture.Header()))
-
-			meta := &storage.RequestLog{
-				ID:                    requestID,
-				Timestamp:             startTime,
-				MerchantKey:           m.Key,
-				Region:                region,
-				Method:                r.Method,
-				Path:                  r.URL.Path,
-				QueryParams:           pii.RedactQueryString(r.URL.RawQuery, piiRegistry.QueryParamsExtra()),
-				StatusCode:            capture.StatusCode(),
-				CacheStatus:           cacheStatus,
-				TotalLatencyMs:        totalLatency,
-				RequestContentLength:  r.ContentLength,
-				ResponseContentLength: int64(capture.BytesWritten()),
-			}
-
-			// Amazon request ID (different header names used by different APIs)
-			if rid := capture.Header().Get("x-amz-request-id"); rid != "" {
-				meta.AmazonRequestID = rid
-			} else if rid := capture.Header().Get("x-amzn-RequestId"); rid != "" {
-				meta.AmazonRequestID = rid
-			}
-
-			// Queue info from rate limiter
-			if capture.Header().Get("X-SP-Proxy-Queued") == "true" {
-				meta.Queued = true
-				if ms, err := strconv.ParseInt(capture.Header().Get("X-SP-Proxy-Queue-Wait-Ms"), 10, 64); err == nil {
-					meta.QueueWaitMs = ms
-				}
-			}
-
-			// Error reason (set by proxy ErrorHandler for 502s).
-			// F-16: store the rich internal classification from the
-			// context slot (not exposed to the caller); fall back to the
-			// coarse public header for paths that don't go through the
-			// upstream ErrorHandler (e.g. rate-limit's
-			// "client_disconnected_in_queue", which is set directly on
-			// the response header by the rate-limit middleware).
-			if reason := getInternalErrorReason(); reason != "" {
-				meta.ErrorReason = reason
-			} else if reason := capture.Header().Get("X-SP-Proxy-Error-Reason"); reason != "" {
-				meta.ErrorReason = reason
-			}
-
-			// Upstream latency approximation
-			meta.UpstreamLatencyMs = totalLatency - meta.QueueWaitMs
-
-			// Build log entry
-			entry := &LogEntry{Meta: meta}
-
-			if cacheStatus == "HIT" {
-				// Cache hit: no body, just reference to original. Headers still go
-				// into a BodyEntry so they can be retrieved from JSONL alongside the
-				// original response's payload.
-				meta.CachedFromID = capture.Header().Get("X-SP-Proxy-Cache-Source-ID")
-				entry.Body = &bodies.BodyEntry{
-					ID:              requestID,
-					RequestHeaders:  reqHeaders,
-					ResponseHeaders: respHeaders,
-				}
-			} else {
-				responseBody := decompressIfGzipBounded(capture.CapturedBody(), capture.Header(), 4*maxCaptureSize)
-				bodyEntry := &bodies.BodyEntry{
-					ID:              requestID,
-					RequestHeaders:  reqHeaders,
-					ResponseHeaders: respHeaders,
-				}
-				if len(responseBody) > 0 {
-					bodyEntry.ResponseBody = json.RawMessage(responseBody)
-				}
-				if len(requestBody) > 0 {
-					bodyEntry.RequestBody = json.RawMessage(requestBody)
-				}
-
-				if piiRegistry.ContainsPII(r) {
-					meta.PIIRedactedResponse = true
-				}
-				if piiRegistry.RequestBodyContainsPII(r) {
-					meta.PIIRedactedRequest = true
-					entry.RequestBodyEndpoint = piiRegistry.RequestBodyPattern(r)
-				}
-
-				entry.Body = bodyEntry
-			}
-
+			meta := buildRequestLog(r, capture, piiRegistry, requestID, region, startTime, getInternalErrorReason)
+			entry := buildLogEntry(r, capture, piiRegistry, meta, requestID, requestBody, maxCaptureSize)
 			logger.Log(entry)
 		})
 	}
+}
+
+// captureRequestBody snapshots the request body for mutating methods so the
+// log entry can include the payload. The body is restored to a fresh reader
+// before downstream handlers run. Bodies above maxCaptureSize are skipped to
+// avoid pulling unbounded memory into the logging path.
+func captureRequestBody(r *http.Request, maxCaptureSize int64) []byte {
+	if r.Body == nil || r.ContentLength <= 0 || r.ContentLength > maxCaptureSize {
+		return nil
+	}
+	switch r.Method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch:
+	default:
+		return nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(r.Body, maxCaptureSize))
+	r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	return body
+}
+
+// buildRequestLog assembles the storage.RequestLog metadata from the captured
+// response. getInternalErrorReason is the closure returned by
+// proxy.PrepareInternalErrorReason and reads back the rich F-16 reason after
+// the chain has run.
+func buildRequestLog(r *http.Request, capture *ResponseCapture, piiRegistry *pii.Registry, requestID, region string, startTime time.Time, getInternalErrorReason func() string) *storage.RequestLog {
+	totalLatency := time.Since(startTime).Milliseconds()
+	m := merchant.MerchantFromContext(r.Context())
+	cacheStatus := capture.Header().Get("X-SP-Proxy-Cache")
+
+	meta := &storage.RequestLog{
+		ID:                    requestID,
+		Timestamp:             startTime,
+		MerchantKey:           m.Key,
+		Region:                region,
+		Method:                r.Method,
+		Path:                  r.URL.Path,
+		QueryParams:           pii.RedactQueryString(r.URL.RawQuery, piiRegistry.QueryParamsExtra()),
+		StatusCode:            capture.StatusCode(),
+		CacheStatus:           cacheStatus,
+		TotalLatencyMs:        totalLatency,
+		RequestContentLength:  r.ContentLength,
+		ResponseContentLength: int64(capture.BytesWritten()),
+	}
+
+	// Amazon request ID (different header names used by different APIs).
+	if rid := capture.Header().Get("x-amz-request-id"); rid != "" {
+		meta.AmazonRequestID = rid
+	} else if rid := capture.Header().Get("x-amzn-RequestId"); rid != "" {
+		meta.AmazonRequestID = rid
+	}
+
+	if capture.Header().Get("X-SP-Proxy-Queued") == "true" {
+		meta.Queued = true
+		if ms, err := strconv.ParseInt(capture.Header().Get("X-SP-Proxy-Queue-Wait-Ms"), 10, 64); err == nil {
+			meta.QueueWaitMs = ms
+		}
+	}
+
+	// F-16: prefer the rich internal classification (not exposed to the
+	// caller); fall back to the coarse public header for paths that don't
+	// go through the upstream ErrorHandler (e.g. rate-limit's
+	// "client_disconnected_in_queue", set directly on the response header).
+	if reason := getInternalErrorReason(); reason != "" {
+		meta.ErrorReason = reason
+	} else if reason := capture.Header().Get("X-SP-Proxy-Error-Reason"); reason != "" {
+		meta.ErrorReason = reason
+	}
+
+	meta.UpstreamLatencyMs = totalLatency - meta.QueueWaitMs
+	return meta
+}
+
+// buildLogEntry attaches the captured headers and (when the request was a
+// cache miss) the response/request bodies to a LogEntry. Cache hits store
+// only a back-reference to the original entry's body.
+func buildLogEntry(r *http.Request, capture *ResponseCapture, piiRegistry *pii.Registry, meta *storage.RequestLog, requestID string, requestBody []byte, maxCaptureSize int64) *LogEntry {
+	reqHeaders := headerToMap(pii.RedactHeaders(r.Header))
+	// Response headers go through the same SensitiveHeaders filter as
+	// request headers (F-12). Amazon does not normally emit session-bearing
+	// values, but the symmetry is defensive.
+	respHeaders := headerToMap(pii.RedactHeaders(capture.Header()))
+
+	entry := &LogEntry{Meta: meta}
+
+	if meta.CacheStatus == "HIT" {
+		// Cache hit: no body, just reference to original. Headers still go
+		// into a BodyEntry so they can be retrieved from JSONL alongside
+		// the original response's payload.
+		meta.CachedFromID = capture.Header().Get("X-SP-Proxy-Cache-Source-ID")
+		entry.Body = &bodies.BodyEntry{
+			ID:              requestID,
+			RequestHeaders:  reqHeaders,
+			ResponseHeaders: respHeaders,
+		}
+		return entry
+	}
+
+	responseBody := decompressIfGzipBounded(capture.CapturedBody(), capture.Header(), 4*maxCaptureSize)
+	bodyEntry := &bodies.BodyEntry{
+		ID:              requestID,
+		RequestHeaders:  reqHeaders,
+		ResponseHeaders: respHeaders,
+	}
+	if len(responseBody) > 0 {
+		bodyEntry.ResponseBody = json.RawMessage(responseBody)
+	}
+	if len(requestBody) > 0 {
+		bodyEntry.RequestBody = json.RawMessage(requestBody)
+	}
+
+	if piiRegistry.ContainsPII(r) {
+		meta.PIIRedactedResponse = true
+	}
+	if piiRegistry.RequestBodyContainsPII(r) {
+		meta.PIIRedactedRequest = true
+		entry.RequestBodyEndpoint = piiRegistry.RequestBodyPattern(r)
+	}
+	entry.Body = bodyEntry
+	return entry
 }
 
 // decompressIfGzip decompresses gzip-encoded body bytes for logging using

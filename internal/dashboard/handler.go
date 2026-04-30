@@ -59,4 +59,3 @@ func NewMux(h *Handler) *http.ServeMux {
 
 	return mux
 }
-

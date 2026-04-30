@@ -68,19 +68,16 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 			return
 		}
 
-		// Handle X-SP-Proxy-Force-RDT override header.
-		// Always strip before forwarding to upstream.
+		// Handle X-SP-Proxy-Force-RDT override header. Always strip before
+		// forwarding to upstream.
 		forceValue := r.Header.Get(forceRDTHeader)
 		r.Header.Del(forceRDTHeader)
 
-		if forceValue == "false" {
-			// Explicit opt-out: skip all RDT logic
+		switch forceValue {
+		case "false":
 			next.ServeHTTP(w, r)
 			return
-		}
-
-		if forceValue == "true" {
-			// Explicit opt-in: mint with concrete path, skip matchers
+		case "true":
 			m.handleForceRDT(w, r, next)
 			return
 		}
@@ -93,87 +90,90 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 			}
 		}
 
-		// Check if this is a PII endpoint (non-report)
-		op, isPII := MatchPIIOperation(r.Method, r.URL.Path)
-		if !isPII {
-			next.ServeHTTP(w, r)
+		m.handlePIIOperation(w, r, next)
+	})
+}
+
+// handlePIIOperation handles the auto-mint flow for non-report PII endpoints:
+// classify the request, check the RDT cache, and either swap the token from a
+// cached entry or mint a new one (with singleflight deduplication).
+func (m *Middleware) handlePIIOperation(w http.ResponseWriter, r *http.Request, next http.Handler) {
+	op, isPII := MatchPIIOperation(r.Method, r.URL.Path)
+	if !isPII {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	token := r.Header.Get("x-amz-access-token")
+	if strings.HasPrefix(token, rdtTokenPrefix) {
+		next.ServeHTTP(w, r)
+		return
+	}
+
+	merch := merchant.MerchantFromContext(r.Context())
+	cacheKey := BuildCacheKey(merch.Key, op)
+
+	if op.Cacheable {
+		if entry, ok := m.cache.Get(cacheKey); ok {
+			m.serveWithRDT(w, r, next, entry.Token, cacheKey)
 			return
 		}
+	}
 
-		// Check if client already sends an RDT
-		token := r.Header.Get("x-amz-access-token")
-		if strings.HasPrefix(token, rdtTokenPrefix) {
-			next.ServeHTTP(w, r)
-			return
-		}
+	entry, ok := m.mintWithSingleflight(token, op, cacheKey, merch.Key)
+	if !ok {
+		// Mint failed: fail open with original token.
+		next.ServeHTTP(w, r)
+		return
+	}
+	m.serveWithRDT(w, r, next, entry.Token, cacheKey)
+}
 
-		// Resolve merchant for cache key
-		merch := merchant.MerchantFromContext(r.Context())
-		cacheKey := BuildCacheKey(merch.Key, op)
+// serveWithRDT swaps the access token, calls next, and invalidates the cache
+// entry if upstream returns 401/403 (which means the RDT is no longer valid).
+func (m *Middleware) serveWithRDT(w http.ResponseWriter, r *http.Request, next http.Handler, rdtToken string, cacheKey CacheKey) {
+	r.Header.Set("x-amz-access-token", rdtToken)
+	rec := &statusRecorder{ResponseWriter: w}
+	next.ServeHTTP(rec, r)
+	if rec.status == http.StatusForbidden || rec.status == http.StatusUnauthorized {
+		m.cache.Invalidate(cacheKey)
+	}
+}
 
-		// Try cache (only for cacheable operations)
+// mintWithSingleflight mints an RDT, deduplicating concurrent identical
+// callers. The singleflight key includes a token-hash component so two
+// concurrent callers with the same merchant header but DIFFERENT LWA tokens
+// mint independently. Without this, the first caller's mint fan-out would
+// hand the resulting RDT (which Amazon issued against the FIRST caller's
+// seller-context) to the second caller. In a breached merchant-id boundary
+// (F-04 collisions or deliberate spoofing) this becomes a cross-tenant
+// token-confusion path: spoofer B receives an RDT scoped to seller A's data
+// and Amazon accepts it (Pentest finding F-13).
+func (m *Middleware) mintWithSingleflight(token string, op PIIOperation, cacheKey CacheKey, merchantKey string) (CacheEntry, bool) {
+	tokenHash := sha256.Sum256([]byte(token))
+	sfKey := cacheKey.MerchantID + "|" + cacheKey.GenericPath + "|" + cacheKey.DataElements +
+		"|" + hex.EncodeToString(tokenHash[:8])
+	result, _, _ := m.group.Do(sfKey, func() (any, error) {
+		// Double-check cache after acquiring singleflight slot.
 		if op.Cacheable {
 			if entry, ok := m.cache.Get(cacheKey); ok {
-				r.Header.Set("x-amz-access-token", entry.Token)
-				rec := &statusRecorder{ResponseWriter: w}
-				next.ServeHTTP(rec, r)
-				if rec.status == http.StatusForbidden || rec.status == http.StatusUnauthorized {
-					m.cache.Invalidate(cacheKey)
-				}
-				return
+				return entry, nil
 			}
 		}
-
-		// Cache miss: mint a new RDT (with singleflight deduplication).
-		// Include a token-hash component so two concurrent callers with the
-		// same merchant header but DIFFERENT LWA tokens mint independently.
-		// Without this, the first caller's mint fan-out would hand the
-		// resulting RDT (which Amazon issued against the FIRST caller's
-		// seller-context) to the second caller. In a breached merchant-id
-		// boundary (F-04 collisions or deliberate spoofing) this becomes a
-		// cross-tenant token-confusion path: spoofer B receives an RDT
-		// scoped to seller A's data and Amazon accepts it.
-		// Pentest finding F-13.
-		tokenHash := sha256.Sum256([]byte(token))
-		sfKey := cacheKey.MerchantID + "|" + cacheKey.GenericPath + "|" + cacheKey.DataElements +
-			"|" + hex.EncodeToString(tokenHash[:8])
-		result, _, _ := m.group.Do(sfKey, func() (any, error) {
-			// Double-check cache after acquiring singleflight slot
-			if op.Cacheable {
-				if entry, ok := m.cache.Get(cacheKey); ok {
-					return entry, nil
-				}
-			}
-
-			entry, err := m.minter.Mint(token, op.ToRestrictedResource())
-			if err != nil {
-				slog.Warn("rdt: mint failed, failing open", "error", err, "path", op.GenericPath, "merchant", merch.Key)
-				return nil, err
-			}
-
-			if op.Cacheable {
-				m.cache.Set(cacheKey, entry)
-			}
-			return entry, nil
-		})
-
-		if result == nil {
-			// Mint failed: fail open with original token
-			next.ServeHTTP(w, r)
-			return
+		entry, err := m.minter.Mint(token, op.ToRestrictedResource())
+		if err != nil {
+			slog.Warn("rdt: mint failed, failing open", "error", err, "path", op.GenericPath, "merchant", merchantKey)
+			return nil, err
 		}
-
-		entry := result.(CacheEntry)
-		r.Header.Set("x-amz-access-token", entry.Token)
-
-		rec := &statusRecorder{ResponseWriter: w}
-		next.ServeHTTP(rec, r)
-
-		// Invalidate on 401/403 from upstream
-		if rec.status == http.StatusForbidden || rec.status == http.StatusUnauthorized {
-			m.cache.Invalidate(cacheKey)
+		if op.Cacheable {
+			m.cache.Set(cacheKey, entry)
 		}
+		return entry, nil
 	})
+	if result == nil {
+		return CacheEntry{}, false
+	}
+	return result.(CacheEntry), true
 }
 
 // handleForceRDT handles requests with X-SP-Proxy-Force-RDT: true.

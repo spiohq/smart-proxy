@@ -79,10 +79,10 @@ func lookupBatchConfig(path string) *batchEndpointConfig {
 // from a getItemOffersBatch request element.
 func extractItemOffersKey(elem json.RawMessage) (string, error) {
 	var req struct {
-		URI            string `json:"uri"`
-		MarketplaceId  string `json:"MarketplaceId"`
-		ItemCondition  string `json:"ItemCondition"`
-		CustomerType   string `json:"CustomerType"`
+		URI           string `json:"uri"`
+		MarketplaceId string `json:"MarketplaceId"`
+		ItemCondition string `json:"ItemCondition"`
+		CustomerType  string `json:"CustomerType"`
 	}
 	if err := json.Unmarshal(elem, &req); err != nil {
 		return "", err
@@ -103,10 +103,10 @@ func extractItemOffersKey(elem json.RawMessage) (string, error) {
 // from a getListingOffersBatch request element.
 func extractListingOffersKey(elem json.RawMessage) (string, error) {
 	var req struct {
-		URI            string `json:"uri"`
-		MarketplaceId  string `json:"MarketplaceId"`
-		ItemCondition  string `json:"ItemCondition"`
-		CustomerType   string `json:"CustomerType"`
+		URI           string `json:"uri"`
+		MarketplaceId string `json:"MarketplaceId"`
+		ItemCondition string `json:"ItemCondition"`
+		CustomerType  string `json:"CustomerType"`
 	}
 	if err := json.Unmarshal(elem, &req); err != nil {
 		return "", err
@@ -130,9 +130,9 @@ func extractFeesKey(elem json.RawMessage) (string, error) {
 		IdType  string `json:"IdType"`
 		IdValue string `json:"IdValue"`
 		FER     struct {
-			MarketplaceId      string `json:"MarketplaceId"`
-			IsAmazonFulfilled  *bool  `json:"IsAmazonFulfilled"`
-			PriceToEstimate    struct {
+			MarketplaceId     string `json:"MarketplaceId"`
+			IsAmazonFulfilled *bool  `json:"IsAmazonFulfilled"`
+			PriceToEstimate   struct {
 				ListingPrice struct {
 					CurrencyCode string  `json:"CurrencyCode"`
 					Amount       float64 `json:"Amount"`

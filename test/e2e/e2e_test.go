@@ -20,7 +20,7 @@ func TestE2E_ProxyRoundTrip(t *testing.T) {
 	env.MockSPAPI.SetResponse("/orders/v0/orders", mock.Response{
 		StatusCode: 200,
 		Headers: http.Header{
-			"Content-Type":            []string{"application/json"},
+			"Content-Type":           []string{"application/json"},
 			"x-amzn-RequestId":       []string{"amz-123"},
 			"x-amzn-RateLimit-Limit": []string{"0.0167"},
 		},
@@ -47,7 +47,7 @@ func TestE2E_CacheHitMiss(t *testing.T) {
 	env.MockSPAPI.SetResponse("/catalog/v0/items", mock.Response{
 		StatusCode: 200,
 		Headers: http.Header{
-			"Content-Type":            []string{"application/json"},
+			"Content-Type":           []string{"application/json"},
 			"x-amzn-RequestId":       []string{"amz-456"},
 			"x-amzn-RateLimit-Limit": []string{"2.0"},
 		},

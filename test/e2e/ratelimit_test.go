@@ -59,7 +59,7 @@ func TestE2E_RateLimit_QueueMode(t *testing.T) {
 	env.MockSPAPI.SetResponse("/orders/v0/orders", mock.Response{
 		StatusCode: 200,
 		Headers: http.Header{
-			"Content-Type":            []string{"application/json"},
+			"Content-Type":           []string{"application/json"},
 			"x-amzn-RateLimit-Limit": []string{"0.0167"},
 		},
 		Body: []byte(`{"payload":{"orders":[]}}`),
@@ -99,7 +99,7 @@ func TestE2E_RateLimit_QueueTimeoutMode(t *testing.T) {
 	env.MockSPAPI.SetResponse("/orders/v0/orders", mock.Response{
 		StatusCode: 200,
 		Headers: http.Header{
-			"Content-Type":            []string{"application/json"},
+			"Content-Type":           []string{"application/json"},
 			"x-amzn-RateLimit-Limit": []string{"0.0167"},
 		},
 		Body: []byte(`{"payload":{"orders":[]}}`),
@@ -184,7 +184,7 @@ func TestE2E_RateLimit_HeaderOverridesMode(t *testing.T) {
 	env.MockSPAPI.SetResponse("/orders/v0/orders", mock.Response{
 		StatusCode: 200,
 		Headers: http.Header{
-			"Content-Type":            []string{"application/json"},
+			"Content-Type":           []string{"application/json"},
 			"x-amzn-RateLimit-Limit": []string{"0.0167"},
 		},
 		Body: []byte(`{"payload":{"orders":[]}}`),
@@ -226,7 +226,7 @@ func TestE2E_RateLimit_MerchantModeOverride(t *testing.T) {
 	env.MockSPAPI.SetResponse("/orders/v0/orders", mock.Response{
 		StatusCode: 200,
 		Headers: http.Header{
-			"Content-Type":            []string{"application/json"},
+			"Content-Type":           []string{"application/json"},
 			"x-amzn-RateLimit-Limit": []string{"0.0167"},
 		},
 		Body: []byte(`{"payload":{"orders":[]}}`),
