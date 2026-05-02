@@ -14,20 +14,18 @@ type entry struct {
 }
 
 // Store holds the most recently seen x-amz-access-token per merchant key.
-// Tokens are kept in RAM only and expire after 55 minutes (same safety margin
-// as the RDT cache). This follows the pattern established in internal/rdt/cache.go.
 type Store struct {
 	mu      sync.RWMutex
 	entries map[string]entry
 	ttl     time.Duration
 }
 
-// New creates a Store with the default 55-minute TTL.
+// New creates a Store with the default TTL. 55 minutes matches the upstream
+// access-token lifetime with a small safety margin.
 func New() *Store {
 	return NewWithTTL(defaultTTL)
 }
 
-// NewWithTTL creates a Store with a custom TTL. Used in tests.
 func NewWithTTL(ttl time.Duration) *Store {
 	return &Store{
 		entries: make(map[string]entry),
@@ -35,7 +33,6 @@ func NewWithTTL(ttl time.Duration) *Store {
 	}
 }
 
-// Set records the most recently seen token for merchantKey.
 func (s *Store) Set(merchantKey, token string) {
 	if merchantKey == "" || token == "" {
 		return
@@ -45,7 +42,6 @@ func (s *Store) Set(merchantKey, token string) {
 	s.mu.Unlock()
 }
 
-// Get returns the token for merchantKey if one exists and has not expired.
 func (s *Store) Get(merchantKey string) (string, bool) {
 	s.mu.RLock()
 	e, ok := s.entries[merchantKey]
@@ -62,9 +58,9 @@ func (s *Store) Get(merchantKey string) (string, bool) {
 	return e.token, true
 }
 
-// UnavailabilityReason returns a human-readable English explanation of why
-// no valid token is available for merchantKey. Returns "" if a token IS
-// available (callers should call Get first).
+// UnavailabilityReason returns a human-readable explanation of why no valid
+// token is available. Returns "" if a live token exists (callers should call
+// Get first).
 func (s *Store) UnavailabilityReason(merchantKey string) string {
 	s.mu.RLock()
 	e, ok := s.entries[merchantKey]
@@ -72,6 +68,9 @@ func (s *Store) UnavailabilityReason(merchantKey string) string {
 	if !ok {
 		return "No valid token available for this merchant. Send a new request through your client to activate replay."
 	}
+	if time.Since(e.seenAt) < s.ttl {
+		return ""
+	}
 	age := time.Since(e.seenAt)
-	return fmt.Sprintf("Token expired (last seen %.0f minutes ago, limit is 55). Send a new request through your client to refresh it.", age.Minutes())
+	return fmt.Sprintf("Token expired (last seen %.0f minutes ago, limit is %.0f). Send a new request through your client to refresh it.", age.Minutes(), s.ttl.Minutes())
 }
