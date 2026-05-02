@@ -12,6 +12,7 @@ import (
 	"github.com/spiohq/smart-proxy/internal/endpoint"
 	"github.com/spiohq/smart-proxy/internal/pii"
 	"github.com/spiohq/smart-proxy/internal/storage"
+	"github.com/spiohq/smart-proxy/internal/tokenstore"
 )
 
 const (
@@ -22,13 +23,14 @@ const (
 // AsyncLogger receives log entries on a buffered channel and writes them
 // to storage in batches. Non-blocking  -  never slows down the proxy.
 type AsyncLogger struct {
-	store     storage.Store
-	bodyStore bodies.BodyStore
-	piiEngine *pii.Engine
-	entries   chan *LogEntry
-	wg        sync.WaitGroup
-	dropped   atomic.Int64
-	closeOnce sync.Once
+	store      storage.Store
+	bodyStore  bodies.BodyStore
+	piiEngine  *pii.Engine
+	tokenStore *tokenstore.Store
+	entries    chan *LogEntry
+	wg         sync.WaitGroup
+	dropped    atomic.Int64
+	closeOnce  sync.Once
 }
 
 // NewAsyncLogger creates a logger and starts the background worker.
@@ -42,6 +44,19 @@ func NewAsyncLogger(store storage.Store, bodyStore bodies.BodyStore, piiEngine *
 	l.wg.Add(1)
 	go l.worker()
 	return l
+}
+
+// NewAsyncLoggerWithTokenStore creates a logger with an attached token store
+// for capturing access tokens before header redaction.
+func NewAsyncLoggerWithTokenStore(store storage.Store, bodyStore bodies.BodyStore, piiEngine *pii.Engine, queueSize int, ts *tokenstore.Store) *AsyncLogger {
+	l := NewAsyncLogger(store, bodyStore, piiEngine, queueSize)
+	l.tokenStore = ts
+	return l
+}
+
+// TokenStore returns the attached token store, or nil if none was configured.
+func (l *AsyncLogger) TokenStore() *tokenstore.Store {
+	return l.tokenStore
 }
 
 // Log sends an entry to the async pipeline. Non-blocking  -  drops if channel is full or closed.
