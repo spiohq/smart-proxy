@@ -149,7 +149,7 @@
           {/if}
         </button>
       {/each}
-      {#if replayResult !== null}
+      {#if replayResult !== null && replayResult.available !== false}
         <button
           onclick={() => activeTab = 'replay'}
           class="px-6 py-4 font-label text-sm transition-colors border-b-2 -mb-px
