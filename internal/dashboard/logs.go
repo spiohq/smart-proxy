@@ -155,9 +155,11 @@ type logDetailResponse struct {
 	PIIRedactedRequest    bool              `json:"piiRedactedRequest"`
 	PIIRedactedResponse   bool              `json:"piiRedactedResponse"`
 	PIIRedacted           bool              `json:"piiRedacted"` // legacy OR shim -- keep for one release
-	AmazonRequestID       string            `json:"amazonRequestId,omitempty"`
-	ErrorReason           string            `json:"errorReason,omitempty"`
-	HasBody               bool              `json:"hasBody"`
+	AmazonRequestID            string            `json:"amazonRequestId,omitempty"`
+	ErrorReason                string            `json:"errorReason,omitempty"`
+	HasBody                    bool              `json:"hasBody"`
+	ReplayAvailable            bool              `json:"replayAvailable"`
+	ReplayUnavailableReason    string            `json:"replayUnavailableReason,omitempty"`
 }
 
 func (h *Handler) handleLogByID(w http.ResponseWriter, r *http.Request) {
@@ -225,6 +227,15 @@ func (h *Handler) handleLogByID(w http.ResponseWriter, r *http.Request) {
 					resp.ResponseHeaders = body.ResponseHeaders
 				}
 			}
+		}
+	}
+
+	if h.tokenStore != nil {
+		if _, ok := h.tokenStore.Get(entry.MerchantKey); ok {
+			resp.ReplayAvailable = true
+		} else {
+			resp.ReplayAvailable = false
+			resp.ReplayUnavailableReason = h.tokenStore.UnavailabilityReason(entry.MerchantKey)
 		}
 	}
 
