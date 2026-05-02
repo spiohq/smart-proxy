@@ -1,6 +1,6 @@
 const BASE = '';
 
-async function fetchJSON<T>(url: string, params?: Record<string, string>): Promise<T> {
+async function fetchJSON<T>(url: string, params?: Record<string, string>, method = 'GET'): Promise<T> {
   const searchParams = new URLSearchParams();
   if (params) {
     for (const [key, value] of Object.entries(params)) {
@@ -9,7 +9,7 @@ async function fetchJSON<T>(url: string, params?: Record<string, string>): Promi
   }
   const query = searchParams.toString();
   const fullUrl = query ? `${BASE}${url}?${query}` : `${BASE}${url}`;
-  const res = await fetch(fullUrl);
+  const res = await fetch(fullUrl, { method });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(body.error || res.statusText);
@@ -62,11 +62,23 @@ export interface LogDetail {
   amazonRequestId?: string;
   errorReason?: string;
   hasBody: boolean;
+  replayAvailable: boolean;
+  replayUnavailableReason?: string;
 }
 
 export interface LogBody {
   requestBody: unknown;
   responseBody: unknown;
+}
+
+export interface ReplayResult {
+  available: boolean;
+  reason?: string;
+  statusCode?: number;
+  responseHeaders?: Record<string, string>;
+  responseBody?: unknown;
+  replayError?: string;
+  bodyUnavailable?: boolean;
 }
 
 export interface AuditEvent {
@@ -118,6 +130,10 @@ export function getAuditEvents(params: {
 
 export function getMerchants(q?: string) {
   return fetchJSON<{ merchants: string[] }>('/api/v1/merchants', q ? { q } : undefined);
+}
+
+export function replayLog(id: string) {
+  return fetchJSON<ReplayResult>(`/api/v1/logs/${encodeURIComponent(id)}/replay`, undefined, 'POST');
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────
