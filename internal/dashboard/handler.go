@@ -7,14 +7,17 @@ import (
 	"github.com/spiohq/smart-proxy/internal/bodies"
 	"github.com/spiohq/smart-proxy/internal/pii"
 	"github.com/spiohq/smart-proxy/internal/storage"
+	"github.com/spiohq/smart-proxy/internal/tokenstore"
 )
 
 // Handler holds dependencies for all dashboard API endpoints.
 type Handler struct {
-	logStore   storage.Store
-	auditStore audit.Store
-	bodyStore  bodies.BodyStore
-	piiEngine  *pii.Engine // optional; nil disables read-side redaction (test setups)
+	logStore     storage.Store
+	auditStore   audit.Store
+	bodyStore    bodies.BodyStore
+	piiEngine    *pii.Engine // optional; nil disables read-side redaction (test setups)
+	tokenStore   *tokenstore.Store
+	proxyHandler http.Handler
 }
 
 // NewHandler creates a dashboard handler without read-side PII redaction.
@@ -30,6 +33,23 @@ func NewHandler(logStore storage.Store, auditStore audit.Store, bodyStore bodies
 // filter acts as belt-and-suspenders against future write-side bugs.
 func NewHandlerWithPII(logStore storage.Store, auditStore audit.Store, bodyStore bodies.BodyStore, engine *pii.Engine) *Handler {
 	return &Handler{logStore: logStore, auditStore: auditStore, bodyStore: bodyStore, piiEngine: engine}
+}
+
+// NewHandlerWithPIIAndReplay is like NewHandlerWithPII but also wires in the
+// token store needed by the replay endpoint.
+func NewHandlerWithPIIAndReplay(logStore storage.Store, auditStore audit.Store, bodyStore bodies.BodyStore, engine *pii.Engine, ts *tokenstore.Store) *Handler {
+	return &Handler{
+		logStore:   logStore,
+		auditStore: auditStore,
+		bodyStore:  bodyStore,
+		piiEngine:  engine,
+		tokenStore: ts,
+	}
+}
+
+// SetProxyHandler injects the proxy handler used to forward replayed requests.
+func (h *Handler) SetProxyHandler(ph http.Handler) {
+	h.proxyHandler = ph
 }
 
 // NewMux returns an http.ServeMux with all API routes and SPA serving registered.
@@ -52,6 +72,7 @@ func NewMux(h *Handler) *http.ServeMux {
 	mux.HandleFunc("GET /api/v1/logs", h.handleLogs)
 	mux.HandleFunc("GET /api/v1/logs/{id}", h.handleLogByID)
 	mux.HandleFunc("GET /api/v1/logs/{id}/body", h.handleLogBody)
+	mux.HandleFunc("POST /api/v1/logs/{id}/replay", h.handleReplay)
 	mux.HandleFunc("GET /api/v1/audit", h.handleAudit)
 	mux.HandleFunc("GET /api/v1/merchants", h.handleMerchants)
 	// SPA catch-all (must be last)
