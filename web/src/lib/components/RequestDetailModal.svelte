@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { LogDetail, LogBody } from '$lib/api';
-  import { formatLatency, formatBytes } from '$lib/api';
+  import type { LogDetail, LogBody, ReplayResult } from '$lib/api';
+  import { formatLatency, formatBytes, replayLog } from '$lib/api';
   import JsonView from './JsonView.svelte';
 
   let { detail, body, detailLoading, onclose, onloadbody, onselectlog }: {
@@ -12,7 +12,9 @@
     onselectlog: (id: string) => void;
   } = $props();
 
-  let activeTab = $state<'overview' | 'headers' | 'body'>('overview');
+  let activeTab = $state<'overview' | 'headers' | 'body' | 'replay'>('overview');
+  let replayLoading = $state(false);
+  let replayResult = $state<ReplayResult | null>(null);
 
   function statusColor(code: number): string {
     if (code >= 500) return 'text-error';
@@ -44,6 +46,18 @@
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') onclose();
+  }
+
+  async function replayCall() {
+    replayLoading = true;
+    try {
+      replayResult = await replayLog(detail.id);
+      activeTab = 'replay';
+    } catch {
+      replayResult = { available: false, reason: 'Replay request failed. Check the browser console.' };
+    } finally {
+      replayLoading = false;
+    }
   }
 
   let timingSegments = $derived.by(() => {
@@ -135,6 +149,15 @@
           {/if}
         </button>
       {/each}
+      {#if replayResult !== null}
+        <button
+          onclick={() => activeTab = 'replay'}
+          class="px-6 py-4 font-label text-sm transition-colors border-b-2 -mb-px
+            {activeTab === 'replay'
+              ? 'text-primary border-primary font-bold'
+              : 'text-on-surface-variant hover:text-on-background border-transparent'}"
+        >Replay</button>
+      {/if}
     </div>
 
     <!-- Content (scrollable) -->
@@ -321,6 +344,48 @@
             <div class="w-5 h-5 rounded-full border-2 border-primary/30 border-t-primary animate-spin"></div>
           </div>
         {/if}
+      {:else if activeTab === 'replay'}
+        {#if replayResult}
+          <div class="space-y-4">
+            {#if replayResult.replayError}
+              <div class="rounded-xl bg-[#d98f5d]/10 border border-[#d98f5d]/30 p-4 text-sm text-[#d98f5d] font-label flex items-center gap-2">
+                <span class="material-symbols-outlined text-base">warning</span>
+                {replayResult.replayError}
+              </div>
+            {/if}
+            {#if replayResult.bodyUnavailable}
+              <div class="rounded-xl bg-surface-container border border-outline-variant/10 p-4 text-sm text-on-surface-variant font-label flex items-center gap-2">
+                <span class="material-symbols-outlined text-base">info</span>
+                Original request body was unavailable (evicted); replay was sent without a request body.
+              </div>
+            {/if}
+            {#if replayResult.statusCode !== undefined}
+              <div class="flex items-center gap-3">
+                <span class="text-[10px] font-label text-outline uppercase tracking-wider font-bold">Status</span>
+                <span class="text-lg font-bold {statusColor(replayResult.statusCode)}">{replayResult.statusCode}</span>
+              </div>
+            {/if}
+            {#if replayResult.responseHeaders && Object.keys(replayResult.responseHeaders).length > 0}
+              <div>
+                <h3 class="text-[10px] uppercase font-label tracking-widest text-outline mb-3 font-bold">Response Headers</h3>
+                <div class="rounded-xl bg-surface-container border border-outline-variant/10 overflow-hidden">
+                  <div class="grid grid-cols-[140px_1fr] gap-x-8 gap-y-2 font-label text-sm p-4">
+                    {#each Object.entries(replayResult.responseHeaders) as [key, value]}
+                      <span class="{isImportantHeader(key) ? 'text-primary' : 'text-on-surface-variant opacity-60'}">{key}</span>
+                      <span class="text-on-surface font-mono break-all truncate">{value}</span>
+                    {/each}
+                  </div>
+                </div>
+              </div>
+            {/if}
+            {#if replayResult.responseBody !== undefined && replayResult.responseBody !== null}
+              <div>
+                <h3 class="text-[10px] uppercase font-label tracking-widest text-outline mb-3 font-bold">Response Body</h3>
+                <JsonView data={replayResult.responseBody} />
+              </div>
+            {/if}
+          </div>
+        {/if}
       {/if}
     </div>
 
@@ -341,6 +406,37 @@
           <span class="text-[10px] font-label text-outline uppercase font-bold">Status</span>
           <span class="text-sm font-label {statusColor(detail.statusCode)} font-bold">{detail.statusCode}</span>
         </div>
+      </div>
+      <div class="flex items-center gap-2">
+        {#if detail.replayAvailable}
+          <button
+            onclick={replayCall}
+            disabled={replayLoading}
+            class="flex items-center gap-1.5 bg-primary/10 hover:bg-primary/20 disabled:opacity-50 disabled:cursor-not-allowed text-primary px-4 py-2 rounded-lg transition-all text-xs font-label font-bold border border-primary/20"
+          >
+            {#if replayLoading}
+              <div class="w-3 h-3 rounded-full border-2 border-primary/30 border-t-primary animate-spin"></div>
+            {:else}
+              <span class="material-symbols-outlined text-sm">replay</span>
+            {/if}
+            Replay
+          </button>
+        {:else}
+          <div class="relative group">
+            <button
+              disabled
+              class="flex items-center gap-1.5 bg-surface-container text-on-surface-variant opacity-40 cursor-not-allowed px-4 py-2 rounded-lg text-xs font-label font-bold border border-outline-variant/20"
+            >
+              <span class="material-symbols-outlined text-sm">replay</span>
+              Replay
+            </button>
+            {#if detail.replayUnavailableReason}
+              <div class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:block bg-surface-container-highest text-on-surface text-[10px] font-label px-3 py-2 rounded-lg shadow-lg border border-outline-variant/10 whitespace-nowrap z-10 max-w-xs text-center">
+                {detail.replayUnavailableReason}
+              </div>
+            {/if}
+          </div>
+        {/if}
       </div>
       <button
         onclick={onclose}
