@@ -3,11 +3,14 @@ package dashboard
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"time"
+
+	"github.com/spiohq/smart-proxy/internal/storage"
 )
 
 type replayResponse struct {
@@ -33,13 +36,14 @@ func (h *Handler) handleReplay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.tokenStore == nil {
+	if h.tokenStore == nil || h.proxyHandler == nil {
 		writeJSON(w, http.StatusOK, replayResponse{
 			Available: false,
-			Reason:    "Replay is not available: token store not configured.",
+			Reason:    "Replay is not available: proxy not fully configured.",
 		})
 		return
 	}
+
 	token, ok := h.tokenStore.Get(entry.MerchantKey)
 	if !ok {
 		writeJSON(w, http.StatusOK, replayResponse{
@@ -49,33 +53,41 @@ func (h *Handler) handleReplay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.proxyHandler == nil {
-		writeJSON(w, http.StatusOK, replayResponse{
-			Available: false,
-			Reason:    "Replay is not available: proxy handler not configured.",
-		})
+	reqBody, bodyUnavailable := h.loadReplayBody(r, entry)
+
+	replayReq, err := buildReplayRequest(r, entry, token, reqBody)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	var reqBody []byte
-	bodyUnavailable := false
+	rec := httptest.NewRecorder()
+	h.proxyHandler.ServeHTTP(rec, replayReq)
+
+	writeJSON(w, http.StatusOK, collectReplayResponse(rec.Result(), bodyUnavailable))
+}
+
+// loadReplayBody fetches the stored request body for the entry. Returns
+// (nil, true) when the body was evicted and the method is mutating.
+func (h *Handler) loadReplayBody(r *http.Request, entry *storage.RequestLog) ([]byte, bool) {
 	if entry.BodyFile != "" {
-		if stored, berr := h.bodyStore.Read(r.Context(), entry.BodyFile, entry.BodyOffset, entry.BodyLength); berr == nil && stored.RequestBody != nil {
-			reqBody = []byte(stored.RequestBody)
+		if stored, err := h.bodyStore.Read(r.Context(), entry.BodyFile, entry.BodyOffset, entry.BodyLength); err == nil && stored.RequestBody != nil {
+			return []byte(stored.RequestBody), false
 		}
 	}
-	if entry.Method != http.MethodGet && entry.Method != http.MethodHead && entry.BodyFile == "" {
-		bodyUnavailable = true
-	}
+	mutating := entry.Method != http.MethodGet && entry.Method != http.MethodHead
+	return nil, mutating && entry.BodyFile == ""
+}
 
+// buildReplayRequest constructs the outbound *http.Request for the replay.
+func buildReplayRequest(r *http.Request, entry *storage.RequestLog, token string, reqBody []byte) (*http.Request, error) {
 	rawPath := entry.Path
 	if entry.QueryParams != "" {
 		rawPath = rawPath + "?" + entry.QueryParams
 	}
 	u, err := url.Parse(rawPath)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "invalid stored path")
-		return
+		return nil, fmt.Errorf("invalid stored path")
 	}
 
 	var bodyReader io.Reader
@@ -83,25 +95,24 @@ func (h *Handler) handleReplay(w http.ResponseWriter, r *http.Request) {
 		bodyReader = bytes.NewReader(reqBody)
 	}
 
-	replayReq, err := http.NewRequestWithContext(r.Context(), entry.Method, u.String(), bodyReader)
+	req, err := http.NewRequestWithContext(r.Context(), entry.Method, u.String(), bodyReader)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to build replay request")
-		return
+		return nil, fmt.Errorf("failed to build replay request")
 	}
-	replayReq.URL = u
-	replayReq.Header.Set("X-Amz-Access-Token", token)
-	replayReq.Header.Set("X-Amz-Date", time.Now().UTC().Format("20060102T150405Z"))
-	replayReq.Header.Set("X-SP-Proxy-Merchant-Id", entry.MerchantKey)
-	replayReq.Header.Set("X-SP-Proxy-No-Cache", "true")
+	req.URL = u
+	req.Header.Set("X-Amz-Access-Token", token)
+	req.Header.Set("X-Amz-Date", time.Now().UTC().Format("20060102T150405Z"))
+	req.Header.Set("X-SP-Proxy-Merchant-Id", entry.MerchantKey)
+	req.Header.Set("X-SP-Proxy-No-Cache", "true")
 	if entry.Region != "" {
-		replayReq.Header.Set("X-SP-Proxy-Region", entry.Region)
+		req.Header.Set("X-SP-Proxy-Region", entry.Region)
 	}
+	return req, nil
+}
 
-	rec := httptest.NewRecorder()
-	h.proxyHandler.ServeHTTP(rec, replayReq)
-	result := rec.Result()
-
-	respHeaders := make(map[string]string)
+// collectReplayResponse reads the recorder result and builds the response DTO.
+func collectReplayResponse(result *http.Response, bodyUnavailable bool) replayResponse {
+	respHeaders := make(map[string]string, len(result.Header))
 	for k, vals := range result.Header {
 		if len(vals) > 0 {
 			respHeaders[k] = vals[0]
@@ -121,12 +132,12 @@ func (h *Handler) handleReplay(w http.ResponseWriter, r *http.Request) {
 		replayErr = "Token rejected by Amazon (401). The token may have expired. Send a new request through your client to refresh it."
 	}
 
-	writeJSON(w, http.StatusOK, replayResponse{
+	return replayResponse{
 		Available:       true,
 		StatusCode:      result.StatusCode,
 		ResponseHeaders: respHeaders,
 		ResponseBody:    respBodyJSON,
 		ReplayError:     replayErr,
 		BodyUnavailable: bodyUnavailable,
-	})
+	}
 }
