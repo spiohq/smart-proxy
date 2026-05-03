@@ -132,34 +132,34 @@ type logListEntry struct {
 }
 
 type logDetailResponse struct {
-	ID                    string            `json:"id"`
-	Timestamp             time.Time         `json:"timestamp"`
-	MerchantKey           string            `json:"merchantKey"`
-	Region                string            `json:"region"`
-	Method                string            `json:"method"`
-	Path                  string            `json:"path"`
-	QueryParams           string            `json:"queryParams,omitempty"`
-	RequestHeaders        map[string]string `json:"requestHeaders,omitempty"`
-	StatusCode            int               `json:"statusCode"`
-	ResponseHeaders       map[string]string `json:"responseHeaders,omitempty"`
-	CacheStatus           string            `json:"cacheStatus"`
-	CachedFromID          string            `json:"cachedFromId,omitempty"`
-	CachedFromTimestamp   *time.Time        `json:"cachedFromTimestamp,omitempty"`
-	CachedFromStatus      int               `json:"cachedFromStatus,omitempty"`
-	Queued                bool              `json:"queued"`
-	QueueWaitMs           int64             `json:"queueWaitMs"`
-	UpstreamLatencyMs     int64             `json:"upstreamLatencyMs"`
-	TotalLatencyMs        int64             `json:"totalLatencyMs"`
-	RequestContentLength  int64             `json:"requestContentLength"`
-	ResponseContentLength int64             `json:"responseContentLength"`
-	PIIRedactedRequest    bool              `json:"piiRedactedRequest"`
-	PIIRedactedResponse   bool              `json:"piiRedactedResponse"`
-	PIIRedacted           bool              `json:"piiRedacted"` // legacy OR shim -- keep for one release
-	AmazonRequestID            string            `json:"amazonRequestId,omitempty"`
-	ErrorReason                string            `json:"errorReason,omitempty"`
-	HasBody                    bool              `json:"hasBody"`
-	ReplayAvailable            bool              `json:"replayAvailable"`
-	ReplayUnavailableReason    string            `json:"replayUnavailableReason,omitempty"`
+	ID                      string            `json:"id"`
+	Timestamp               time.Time         `json:"timestamp"`
+	MerchantKey             string            `json:"merchantKey"`
+	Region                  string            `json:"region"`
+	Method                  string            `json:"method"`
+	Path                    string            `json:"path"`
+	QueryParams             string            `json:"queryParams,omitempty"`
+	RequestHeaders          map[string]string `json:"requestHeaders,omitempty"`
+	StatusCode              int               `json:"statusCode"`
+	ResponseHeaders         map[string]string `json:"responseHeaders,omitempty"`
+	CacheStatus             string            `json:"cacheStatus"`
+	CachedFromID            string            `json:"cachedFromId,omitempty"`
+	CachedFromTimestamp     *time.Time        `json:"cachedFromTimestamp,omitempty"`
+	CachedFromStatus        int               `json:"cachedFromStatus,omitempty"`
+	Queued                  bool              `json:"queued"`
+	QueueWaitMs             int64             `json:"queueWaitMs"`
+	UpstreamLatencyMs       int64             `json:"upstreamLatencyMs"`
+	TotalLatencyMs          int64             `json:"totalLatencyMs"`
+	RequestContentLength    int64             `json:"requestContentLength"`
+	ResponseContentLength   int64             `json:"responseContentLength"`
+	PIIRedactedRequest      bool              `json:"piiRedactedRequest"`
+	PIIRedactedResponse     bool              `json:"piiRedactedResponse"`
+	PIIRedacted             bool              `json:"piiRedacted"` // legacy OR shim -- keep for one release
+	AmazonRequestID         string            `json:"amazonRequestId,omitempty"`
+	ErrorReason             string            `json:"errorReason,omitempty"`
+	HasBody                 bool              `json:"hasBody"`
+	ReplayAvailable         bool              `json:"replayAvailable"`
+	ReplayUnavailableReason string            `json:"replayUnavailableReason,omitempty"`
 }
 
 func (h *Handler) handleLogByID(w http.ResponseWriter, r *http.Request) {
