@@ -230,7 +230,10 @@ func (h *Handler) handleLogByID(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if h.tokenStore != nil {
+	if entry.PIIRedactedRequest {
+		resp.ReplayAvailable = false
+		resp.ReplayUnavailableReason = "Replay unavailable: the request body contained PII and was redacted before storage."
+	} else if h.tokenStore != nil {
 		if _, ok := h.tokenStore.Get(entry.MerchantKey); ok {
 			resp.ReplayAvailable = true
 		} else {
@@ -298,12 +301,12 @@ func (h *Handler) handleLogBody(w http.ResponseWriter, r *http.Request) {
 // request/response pair before returning it to the dashboard caller. See the
 // call site for the F-02 / F-15 motivation.
 func (h *Handler) redactStoredBody(body *bodies.BodyEntry, entry *storage.RequestLog) {
-	classified := endpoint.Classify(entry.Path)
+	classified, known := endpoint.ClassifyKnown(entry.Path)
 	reg := h.piiEngine.Registry()
 
 	// Response side: same logic the async logger uses.
 	if body.ResponseBody != nil {
-		if reg.IsFullBodyPII(classified) {
+		if reg.IsFullBodyPII(classified, known) {
 			body.ResponseBody = json.RawMessage(h.piiEngine.RedactFullBody(classified))
 		} else {
 			redacted, _ := h.piiEngine.RedactForLogging(classified, []byte(body.ResponseBody))
@@ -327,7 +330,7 @@ func (h *Handler) redactStoredBody(body *bodies.BodyEntry, entry *storage.Reques
 	}
 	if redacted, ok := h.piiEngine.RedactRequestBodyForLogging(reqPattern, []byte(body.RequestBody)); ok {
 		body.RequestBody = json.RawMessage(redacted)
-	} else if reg.IsFullBodyPII(classified) {
+	} else if reg.IsFullBodyPII(classified, known) {
 		// Fail-closed unknown path: same fallback as the async logger.
 		body.RequestBody = json.RawMessage(h.piiEngine.RedactFullBody(reqPattern))
 	}

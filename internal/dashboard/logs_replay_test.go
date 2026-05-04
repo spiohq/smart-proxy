@@ -61,6 +61,55 @@ func TestLogDetail_ReplayAvailable_WhenTokenPresent(t *testing.T) {
 	}
 }
 
+func TestLogDetail_ReplayUnavailable_WhenPIIRedactedRequest(t *testing.T) {
+	store, err := storage.NewSQLiteStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	auditStore := audit.NewSQLiteStore(store.DB())
+	ts := tokenstore.New()
+	ts.Set("SELLER_WITH_TOKEN", "Atza|some-valid-token")
+
+	ctx := context.Background()
+	logEntry := &storage.RequestLog{
+		ID:                 "log-detail-replay-pii-001",
+		Timestamp:          time.Now().UTC(),
+		MerchantKey:        "SELLER_WITH_TOKEN",
+		Region:             "eu",
+		Method:             "POST",
+		Path:               "/products/fees/v0/feesEstimate",
+		StatusCode:         200,
+		CacheStatus:        "MISS",
+		PIIRedactedRequest: true,
+	}
+	if err := store.LogRequest(ctx, logEntry); err != nil {
+		t.Fatal(err)
+	}
+
+	h := dashboard.NewHandlerWithPIIAndReplay(store, auditStore, nil, nil, ts)
+	mux := dashboard.NewMux(h)
+
+	req := httptest.NewRequest("GET", "/api/v1/logs/log-detail-replay-pii-001", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", rr.Code)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result["replayAvailable"] != false {
+		t.Fatalf("expected replayAvailable=false, got %v", result["replayAvailable"])
+	}
+	reason, _ := result["replayUnavailableReason"].(string)
+	if reason == "" {
+		t.Fatal("expected non-empty replayUnavailableReason")
+	}
+}
+
 func TestLogDetail_ReplayUnavailable_WhenNoToken(t *testing.T) {
 	store, err := storage.NewSQLiteStore(":memory:")
 	if err != nil {

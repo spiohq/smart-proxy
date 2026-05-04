@@ -426,14 +426,13 @@ func (reg *Registry) RulesFor(endpointPattern string) []FieldRedaction {
 // IsFullBodyPII reports whether the entire response body for the given endpoint
 // pattern is considered PII.
 //
-// In fail-closed mode, any pattern that is neither in the full-body PII set,
-// the unconditional-rule set, nor the conditional-rule set is treated as
-// "unknown" and reported as full-body PII. This causes the logger to redact
-// the entire body rather than letting an unmapped endpoint leak fields by
-// default. Caller passes the *raw* (unclassified) path so we can tell the
-// difference between a known pattern and a pass-through path; that detection
-// is done via endpoint.ClassifyKnown by the caller before invoking us.
-func (reg *Registry) IsFullBodyPII(endpointPattern string) bool {
+// known indicates whether endpointPattern was recognised by endpoint.ClassifyKnown.
+// In fail-closed mode the function returns true for unrecognised paths, but a
+// known SP-API endpoint with no registered PII rules is treated as non-PII:
+// the classifier already established it is a valid Amazon endpoint, so "no
+// rules" means "no PII", not "unknown". This keeps catalogue, pricing, FBA,
+// etc. readable in the dashboard while still protecting genuinely unknown paths.
+func (reg *Registry) IsFullBodyPII(endpointPattern string, known bool) bool {
 	if reg.fullBodyEndpoints[endpointPattern] {
 		return true
 	}
@@ -446,8 +445,8 @@ func (reg *Registry) IsFullBodyPII(endpointPattern string) bool {
 	if len(reg.conditionalRules[endpointPattern]) > 0 {
 		return false
 	}
-	// Unmapped pattern in fail-closed mode: treat as full-body PII.
-	return true
+	// In fail-closed mode only unrecognised paths are treated as full-body PII.
+	return !known
 }
 
 // piiQueryValues maps query parameter names to the values that indicate PII.

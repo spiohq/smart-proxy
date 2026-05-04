@@ -43,7 +43,7 @@ func TestRegistry_IsFullBodyPII(t *testing.T) {
 		"/messaging/v1/orders/{orderId}/messages/{messageId}",
 	}
 	for _, p := range truePatterns {
-		assert.True(t, reg.IsFullBodyPII(p), "expected IsFullBodyPII=true for %s", p)
+		assert.True(t, reg.IsFullBodyPII(p, true), "expected IsFullBodyPII=true for %s", p)
 	}
 
 	falsePatterns := []string{
@@ -51,7 +51,7 @@ func TestRegistry_IsFullBodyPII(t *testing.T) {
 		"/catalog/2022-04-01/items",
 	}
 	for _, p := range falsePatterns {
-		assert.False(t, reg.IsFullBodyPII(p), "expected IsFullBodyPII=false for %s", p)
+		assert.False(t, reg.IsFullBodyPII(p, true), "expected IsFullBodyPII=false for %s", p)
 	}
 }
 
@@ -311,26 +311,24 @@ func TestFailClosed_UnknownEndpointTreatedAsFullBodyPII(t *testing.T) {
 	reg := NewRegistryFailClosed()
 	// Unknown classification: Classify returns the path unchanged when no
 	// pattern matches, and that path is in none of the rule maps.
-	assert.True(t, reg.IsFullBodyPII("/futureapi/2030-01-01/unknown"))
+	assert.True(t, reg.IsFullBodyPII("/futureapi/2030-01-01/unknown", false))
 }
 
 func TestFailClosed_PatternNotInRuleMapsIsFullBody(t *testing.T) {
-	// IsFullBodyPII operates on the classified pattern. In fail-closed mode,
-	// any pattern that is in none of the rule maps (full-body, partial,
-	// conditional) is reported as full-body. This includes both genuinely
-	// unknown paths AND known SP-API endpoints that simply have no PII rules.
-	// The latter is intentional: if we have not registered rules for an
-	// endpoint, we cannot prove it does not return PII, so we redact its
-	// body. Operators who want catalog/finances/etc readable in the
-	// dashboard should leave fail-closed off, or register stub rules.
+	// IsFullBodyPII in fail-closed mode treats unknown paths as full-body PII,
+	// but known SP-API endpoints without PII rules must NOT be flagged —
+	// the classifier already decided the path is a valid Amazon endpoint, so
+	// "no rules" means "no PII", not "unknown".
 	reg := NewRegistryFailClosed()
-	assert.True(t, reg.IsFullBodyPII("/catalog/2022-04-01/items"))
-	assert.True(t, reg.IsFullBodyPII("/futureapi/2030-01-01/unknown"))
+	// Unknown path → full-body PII.
+	assert.True(t, reg.IsFullBodyPII("/futureapi/2030-01-01/unknown", false))
+	// Known path with no rules → NOT full-body PII.
+	assert.False(t, reg.IsFullBodyPII("/catalog/2022-04-01/items/{asin}", true))
 }
 
 func TestFailClosed_KnownPIIEndpointStillFullBody(t *testing.T) {
 	reg := NewRegistryFailClosed()
-	assert.True(t, reg.IsFullBodyPII("/orders/v0/orders/{orderId}/buyerInfo"))
+	assert.True(t, reg.IsFullBodyPII("/orders/v0/orders/{orderId}/buyerInfo", true))
 }
 
 func TestFailClosed_KnownPartialPIIEndpointNotFullBody(t *testing.T) {
@@ -338,7 +336,7 @@ func TestFailClosed_KnownPartialPIIEndpointNotFullBody(t *testing.T) {
 	// /orders/v0/orders has unconditional partial-PII rules. It must NOT be
 	// reported as full-body even in fail-closed mode, so logging keeps the
 	// non-PII fields readable.
-	assert.False(t, reg.IsFullBodyPII("/orders/v0/orders"))
+	assert.False(t, reg.IsFullBodyPII("/orders/v0/orders", true))
 }
 
 func TestFailClosed_KnownConditionalPIIEndpointNotFullBody(t *testing.T) {
@@ -346,7 +344,7 @@ func TestFailClosed_KnownConditionalPIIEndpointNotFullBody(t *testing.T) {
 	// /orders/2026-01-01/orders has only conditional PII rules. It is in
 	// the registry, so it is not "unknown" and should not be flagged as
 	// full-body.
-	assert.False(t, reg.IsFullBodyPII("/orders/2026-01-01/orders"))
+	assert.False(t, reg.IsFullBodyPII("/orders/2026-01-01/orders", true))
 }
 
 func TestFailClosed_ContainsPII_UnknownEndpoint(t *testing.T) {
@@ -397,7 +395,7 @@ func TestFailOpen_ContainsPII_UnknownEndpoint(t *testing.T) {
 func TestFailOpen_IsFullBodyPII_UnknownEndpoint(t *testing.T) {
 	// Default mode: unknown patterns are NOT full-body.
 	reg := NewRegistry()
-	assert.False(t, reg.IsFullBodyPII("/futureapi/2030-01-01/unknown"))
+	assert.False(t, reg.IsFullBodyPII("/futureapi/2030-01-01/unknown", false))
 }
 
 func TestRegulatedInfo_HasFieldRules(t *testing.T) {
@@ -418,7 +416,7 @@ func TestRegulatedInfo_NotFullBody(t *testing.T) {
 	reg := NewRegistry()
 	// regulatedInfo uses field rules (not full-body) so verification metadata
 	// stays visible for operator debugging while PII fields are redacted.
-	assert.False(t, reg.IsFullBodyPII("/orders/v0/orders/{orderId}/regulatedInfo"))
+	assert.False(t, reg.IsFullBodyPII("/orders/v0/orders/{orderId}/regulatedInfo", true))
 }
 
 func TestSingleOrderV0_HasFieldRules(t *testing.T) {
