@@ -457,6 +457,7 @@ make clean          # Clean build artifacts
 | [Rate Limiting](docs/RATE_LIMITING.md) | Token buckets, per-endpoint defaults, modes |
 | [Auto-RDT](docs/RDT.md) | Automatic RDT minting, caching, report handling |
 | [DPP Compliance](docs/DPP_COMPLIANCE.md) | PII redaction configuration, field mappings |
+| [AUP Compliance](docs/AUP_COMPLIANCE.md) | Acceptable Use Policy shared responsibility matrix, operator obligations |
 | [Storage](docs/STORAGE.md) | Body tiers, retention, S3 / Hetzner / MinIO / R2 setup |
 | [Library Integrations](docs/libraries/) | Guides for popular SP-API client libraries |
 
