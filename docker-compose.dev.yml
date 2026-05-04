@@ -20,6 +20,7 @@ services:
       - deploy/example.env
     environment:
       SP_PROXY_DASHBOARD_BIND_ADDR: "0.0.0.0"
+      SP_PROXY_REGION_BIND_ADDR: "0.0.0.0"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:9090/_sp-proxy/health"]
       interval: 10s
