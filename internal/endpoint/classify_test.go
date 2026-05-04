@@ -649,13 +649,10 @@ func TestClassifyKnown(t *testing.T) {
 			wantKnown:   true,
 		},
 		{
-			// Static list endpoints (no parameter segments) are NOT registered
-			// as patterns; the classifier returns them unchanged with ok=false.
-			// Documented here so the fail-closed mode behavior is intentional.
-			name:        "static list path passes through unknown",
+			name:        "orders v0 list endpoint -- known",
 			input:       "/orders/v0/orders",
 			wantPattern: "/orders/v0/orders",
-			wantKnown:   false,
+			wantKnown:   true,
 		},
 		{
 			name:        "known parameterized path with trailing slash",
@@ -736,6 +733,58 @@ func TestClassifyKnown(t *testing.T) {
 			pattern, ok := ClassifyKnown(tt.input)
 			assert.Equal(t, tt.wantPattern, pattern)
 			assert.Equal(t, tt.wantKnown, ok)
+		})
+	}
+}
+
+// TestClassifyKnown_ListEndpoints verifies that well-known SP-API list/collection
+// endpoints (no path parameters) are registered and returned with ok=true.
+// These paths previously fell through to the unknown branch, causing
+// fail-closed mode to treat them as full-body PII even though they have
+// explicit partial-PII rules in the registry.
+func TestClassifyKnown_ListEndpoints(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "orders v0 list",
+			input: "/orders/v0/orders",
+			want:  "/orders/v0/orders",
+		},
+		{
+			name:  "orders v0 list with query string",
+			input: "/orders/v0/orders?MarketplaceIds=ATVPDKIKX0DER",
+			want:  "/orders/v0/orders",
+		},
+		{
+			name:  "orders 2026 list",
+			input: "/orders/2026-01-01/orders",
+			want:  "/orders/2026-01-01/orders",
+		},
+		{
+			name:  "fba outbound fulfillmentOrders list",
+			input: "/fba/outbound/2020-07-01/fulfillmentOrders",
+			want:  "/fba/outbound/2020-07-01/fulfillmentOrders",
+		},
+		{
+			name:  "finances v0 financialEvents (top-level)",
+			input: "/finances/v0/financialEvents",
+			want:  "/finances/v0/financialEvents",
+		},
+		{
+			name:  "easyShip package (singular)",
+			input: "/easyShip/2022-03-23/package",
+			want:  "/easyShip/2022-03-23/package",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pattern, ok := ClassifyKnown(tt.input)
+			assert.True(t, ok, "expected known=true for %q, got pattern=%q", tt.input, pattern)
+			assert.Equal(t, tt.want, pattern)
 		})
 	}
 }

@@ -29,9 +29,13 @@ var endpointPatterns = []struct {
 	{"/orders/v0/orders/", 6, "shipment", "/orders/v0/orders/{orderId}/shipment"},
 	// 5 segments
 	{"/orders/v0/orders/", 5, "", "/orders/v0/orders/{orderId}"},
+	// 4 segments (list/GET endpoint)
+	{"/orders/v0/orders", 4, "", "/orders/v0/orders"},
 
 	// ── Orders v2026-01-01 ─────────────────────────────────────────────
 	{"/orders/2026-01-01/orders/", 5, "", "/orders/2026-01-01/orders/{orderId}"},
+	// 4 segments (list/GET endpoint)
+	{"/orders/2026-01-01/orders", 4, "", "/orders/2026-01-01/orders"},
 
 	// ── Catalog ────────────────────────────────────────────────────────
 	{"/catalog/2022-04-01/items/", 5, "", "/catalog/2022-04-01/items/{asin}"},
@@ -100,6 +104,8 @@ var endpointPatterns = []struct {
 	// 6 segments  -  "preview" suffix must come before generic {orderId}
 	{"/fba/outbound/2020-07-01/fulfillmentOrders/", 6, "preview", "/fba/outbound/2020-07-01/fulfillmentOrders/preview"},
 	{"/fba/outbound/2020-07-01/fulfillmentOrders/", 6, "", "/fba/outbound/2020-07-01/fulfillmentOrders/{orderId}"},
+	// 5 segments (list/GET endpoint)
+	{"/fba/outbound/2020-07-01/fulfillmentOrders", 5, "", "/fba/outbound/2020-07-01/fulfillmentOrders"},
 
 	// ── Shipping v1 ────────────────────────────────────────────────────
 	// 6 segments (disambiguated by suffix)
@@ -131,6 +137,8 @@ var endpointPatterns = []struct {
 
 	// ── EasyShip ───────────────────────────────────────────────────────
 	{"/easyShip/2022-03-23/packages/bulk", 5, "", "/easyShip/2022-03-23/packages/bulk"},
+	// 4 segments (single package schedule/GET - note: singular "package")
+	{"/easyShip/2022-03-23/package", 4, "", "/easyShip/2022-03-23/package"},
 
 	// ── Notifications v1 ───────────────────────────────────────────────
 	{"/notifications/v1/subscriptions/", 5, "", "/notifications/v1/subscriptions/{type}"},
@@ -139,6 +147,8 @@ var endpointPatterns = []struct {
 	// ── Finances v0 ────────────────────────────────────────────────────
 	{"/finances/v0/financialEventGroups/", 6, "financialEvents", "/finances/v0/financialEventGroups/{eventGroupId}/financialEvents"},
 	{"/finances/v0/orders/", 6, "financialEvents", "/finances/v0/orders/{orderId}/financialEvents"},
+	// 4 segments (top-level financial events list/GET)
+	{"/finances/v0/financialEvents", 4, "", "/finances/v0/financialEvents"},
 
 	// ── Messaging v1 ───────────────────────────────────────────────────
 	// 7 segments before 6 (more specific first)
