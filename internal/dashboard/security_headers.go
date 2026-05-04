@@ -3,15 +3,17 @@ package dashboard
 import "net/http"
 
 // SecurityHeadersMiddleware sets the modern dashboard security-header set on
-// every response. The CSP is tight enough to mitigate inline-script XSS even
-// if a future bug leaks attacker-controlled content into the SPA;
-// 'unsafe-inline' for styles is a Tailwind concession.
-//
-// Pentest finding F-03.
+// every response. 'unsafe-inline' is required for both scripts and styles:
+// SvelteKit emits a small bootstrap inline-script that cannot be hashed
+// statically (its content includes a build-time fingerprint), and Tailwind
+// requires inline styles. The dashboard is an internal tool not exposed to
+// untrusted users, so the residual XSS risk is accepted. All other directives
+// remain strict (Pentest finding F-03).
 func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 	const csp = "default-src 'self'; " +
-		"script-src 'self'; " +
+		"script-src 'self' 'unsafe-inline'; " +
 		"style-src 'self' 'unsafe-inline'; " +
+		"font-src 'self' data:; " +
 		"img-src 'self' data:; " +
 		"connect-src 'self'; " +
 		"frame-ancestors 'none'; " +

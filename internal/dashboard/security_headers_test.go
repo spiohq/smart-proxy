@@ -30,8 +30,9 @@ func TestSecurityHeadersMiddleware_AddsAllHeaders(t *testing.T) {
 	csp := hdr.Get("Content-Security-Policy")
 	for _, expected := range []string{
 		"default-src 'self'",
-		"script-src 'self'",
+		"script-src 'self' 'unsafe-inline'",
 		"style-src 'self' 'unsafe-inline'",
+		"font-src 'self' data:",
 		"frame-ancestors 'none'",
 		"base-uri 'self'",
 		"form-action 'self'",
