@@ -132,32 +132,34 @@ type logListEntry struct {
 }
 
 type logDetailResponse struct {
-	ID                    string            `json:"id"`
-	Timestamp             time.Time         `json:"timestamp"`
-	MerchantKey           string            `json:"merchantKey"`
-	Region                string            `json:"region"`
-	Method                string            `json:"method"`
-	Path                  string            `json:"path"`
-	QueryParams           string            `json:"queryParams,omitempty"`
-	RequestHeaders        map[string]string `json:"requestHeaders,omitempty"`
-	StatusCode            int               `json:"statusCode"`
-	ResponseHeaders       map[string]string `json:"responseHeaders,omitempty"`
-	CacheStatus           string            `json:"cacheStatus"`
-	CachedFromID          string            `json:"cachedFromId,omitempty"`
-	CachedFromTimestamp   *time.Time        `json:"cachedFromTimestamp,omitempty"`
-	CachedFromStatus      int               `json:"cachedFromStatus,omitempty"`
-	Queued                bool              `json:"queued"`
-	QueueWaitMs           int64             `json:"queueWaitMs"`
-	UpstreamLatencyMs     int64             `json:"upstreamLatencyMs"`
-	TotalLatencyMs        int64             `json:"totalLatencyMs"`
-	RequestContentLength  int64             `json:"requestContentLength"`
-	ResponseContentLength int64             `json:"responseContentLength"`
-	PIIRedactedRequest    bool              `json:"piiRedactedRequest"`
-	PIIRedactedResponse   bool              `json:"piiRedactedResponse"`
-	PIIRedacted           bool              `json:"piiRedacted"` // legacy OR shim -- keep for one release
-	AmazonRequestID       string            `json:"amazonRequestId,omitempty"`
-	ErrorReason           string            `json:"errorReason,omitempty"`
-	HasBody               bool              `json:"hasBody"`
+	ID                      string            `json:"id"`
+	Timestamp               time.Time         `json:"timestamp"`
+	MerchantKey             string            `json:"merchantKey"`
+	Region                  string            `json:"region"`
+	Method                  string            `json:"method"`
+	Path                    string            `json:"path"`
+	QueryParams             string            `json:"queryParams,omitempty"`
+	RequestHeaders          map[string]string `json:"requestHeaders,omitempty"`
+	StatusCode              int               `json:"statusCode"`
+	ResponseHeaders         map[string]string `json:"responseHeaders,omitempty"`
+	CacheStatus             string            `json:"cacheStatus"`
+	CachedFromID            string            `json:"cachedFromId,omitempty"`
+	CachedFromTimestamp     *time.Time        `json:"cachedFromTimestamp,omitempty"`
+	CachedFromStatus        int               `json:"cachedFromStatus,omitempty"`
+	Queued                  bool              `json:"queued"`
+	QueueWaitMs             int64             `json:"queueWaitMs"`
+	UpstreamLatencyMs       int64             `json:"upstreamLatencyMs"`
+	TotalLatencyMs          int64             `json:"totalLatencyMs"`
+	RequestContentLength    int64             `json:"requestContentLength"`
+	ResponseContentLength   int64             `json:"responseContentLength"`
+	PIIRedactedRequest      bool              `json:"piiRedactedRequest"`
+	PIIRedactedResponse     bool              `json:"piiRedactedResponse"`
+	PIIRedacted             bool              `json:"piiRedacted"` // legacy OR shim -- keep for one release
+	AmazonRequestID         string            `json:"amazonRequestId,omitempty"`
+	ErrorReason             string            `json:"errorReason,omitempty"`
+	HasBody                 bool              `json:"hasBody"`
+	ReplayAvailable         bool              `json:"replayAvailable"`
+	ReplayUnavailableReason string            `json:"replayUnavailableReason,omitempty"`
 }
 
 func (h *Handler) handleLogByID(w http.ResponseWriter, r *http.Request) {
@@ -228,6 +230,18 @@ func (h *Handler) handleLogByID(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if entry.PIIRedactedRequest {
+		resp.ReplayAvailable = false
+		resp.ReplayUnavailableReason = "Replay unavailable: the request body contained PII and was redacted before storage."
+	} else if h.tokenStore != nil {
+		if _, ok := h.tokenStore.Get(entry.MerchantKey); ok {
+			resp.ReplayAvailable = true
+		} else {
+			resp.ReplayAvailable = false
+			resp.ReplayUnavailableReason = h.tokenStore.UnavailabilityReason(entry.MerchantKey)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -287,12 +301,12 @@ func (h *Handler) handleLogBody(w http.ResponseWriter, r *http.Request) {
 // request/response pair before returning it to the dashboard caller. See the
 // call site for the F-02 / F-15 motivation.
 func (h *Handler) redactStoredBody(body *bodies.BodyEntry, entry *storage.RequestLog) {
-	classified := endpoint.Classify(entry.Path)
+	classified, known := endpoint.ClassifyKnown(entry.Path)
 	reg := h.piiEngine.Registry()
 
 	// Response side: same logic the async logger uses.
 	if body.ResponseBody != nil {
-		if reg.IsFullBodyPII(classified) {
+		if reg.IsFullBodyPII(classified, known) {
 			body.ResponseBody = json.RawMessage(h.piiEngine.RedactFullBody(classified))
 		} else {
 			redacted, _ := h.piiEngine.RedactForLogging(classified, []byte(body.ResponseBody))
@@ -316,7 +330,7 @@ func (h *Handler) redactStoredBody(body *bodies.BodyEntry, entry *storage.Reques
 	}
 	if redacted, ok := h.piiEngine.RedactRequestBodyForLogging(reqPattern, []byte(body.RequestBody)); ok {
 		body.RequestBody = json.RawMessage(redacted)
-	} else if reg.IsFullBodyPII(classified) {
+	} else if reg.IsFullBodyPII(classified, known) {
 		// Fail-closed unknown path: same fallback as the async logger.
 		body.RequestBody = json.RawMessage(h.piiEngine.RedactFullBody(reqPattern))
 	}

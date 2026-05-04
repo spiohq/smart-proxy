@@ -12,6 +12,7 @@ import (
 	"github.com/spiohq/smart-proxy/internal/endpoint"
 	"github.com/spiohq/smart-proxy/internal/pii"
 	"github.com/spiohq/smart-proxy/internal/storage"
+	"github.com/spiohq/smart-proxy/internal/tokenstore"
 )
 
 const (
@@ -22,13 +23,14 @@ const (
 // AsyncLogger receives log entries on a buffered channel and writes them
 // to storage in batches. Non-blocking  -  never slows down the proxy.
 type AsyncLogger struct {
-	store     storage.Store
-	bodyStore bodies.BodyStore
-	piiEngine *pii.Engine
-	entries   chan *LogEntry
-	wg        sync.WaitGroup
-	dropped   atomic.Int64
-	closeOnce sync.Once
+	store      storage.Store
+	bodyStore  bodies.BodyStore
+	piiEngine  *pii.Engine
+	tokenStore *tokenstore.Store
+	entries    chan *LogEntry
+	wg         sync.WaitGroup
+	dropped    atomic.Int64
+	closeOnce  sync.Once
 }
 
 // NewAsyncLogger creates a logger and starts the background worker.
@@ -42,6 +44,19 @@ func NewAsyncLogger(store storage.Store, bodyStore bodies.BodyStore, piiEngine *
 	l.wg.Add(1)
 	go l.worker()
 	return l
+}
+
+// NewAsyncLoggerWithTokenStore creates a logger with an attached token store
+// for capturing access tokens before header redaction.
+func NewAsyncLoggerWithTokenStore(store storage.Store, bodyStore bodies.BodyStore, piiEngine *pii.Engine, queueSize int, ts *tokenstore.Store) *AsyncLogger {
+	l := NewAsyncLogger(store, bodyStore, piiEngine, queueSize)
+	l.tokenStore = ts
+	return l
+}
+
+// TokenStore returns the attached token store, or nil if none was configured.
+func (l *AsyncLogger) TokenStore() *tokenstore.Store {
+	return l.tokenStore
 }
 
 // Log sends an entry to the async pipeline. Non-blocking  -  drops if channel is full or closed.
@@ -136,11 +151,11 @@ func (l *AsyncLogger) redactBody(entry *LogEntry) {
 		return
 	}
 
-	classifiedPath := endpoint.Classify(entry.Meta.Path)
+	classifiedPath, known := endpoint.ClassifyKnown(entry.Meta.Path)
 
 	// Response-side redaction (existing semantics, gated on the response flag).
 	if entry.Meta.PIIRedactedResponse {
-		if l.piiEngine.Registry().IsFullBodyPII(classifiedPath) {
+		if l.piiEngine.Registry().IsFullBodyPII(classifiedPath, known) {
 			entry.Body.ResponseBody = json.RawMessage(l.piiEngine.RedactFullBody(classifiedPath))
 		} else if entry.Body.ResponseBody != nil {
 			redacted, _ := l.piiEngine.RedactForLogging(classifiedPath, []byte(entry.Body.ResponseBody))
@@ -164,13 +179,10 @@ func (l *AsyncLogger) redactBody(entry *LogEntry) {
 		redacted, ok := l.piiEngine.RedactRequestBodyForLogging(reqEndpoint, []byte(entry.Body.RequestBody))
 		if ok {
 			entry.Body.RequestBody = json.RawMessage(redacted)
-		} else if l.piiEngine.Registry().IsFullBodyPII(classifiedPath) {
-			// Fail-closed unknown path: RequestBodyPattern returned the raw
-			// (unclassified) path, which has no rules registered, so the
-			// engine returned (body, false). Mirror the response-side
-			// behavior and fall back to the full-body placeholder so the
-			// PIIRedactedRequest=true flag accurately reflects what's on
-			// disk. The engine docstring documents this caller contract.
+		} else if l.piiEngine.Registry().IsFullBodyPII(classifiedPath, known) {
+			// Fail-closed unknown path: only reached when the path was not
+			// recognised by the classifier. Mirror the response-side behavior
+			// and replace the body with a placeholder.
 			entry.Body.RequestBody = json.RawMessage(l.piiEngine.RedactFullBody(reqEndpoint))
 		}
 		// else: rule lookup found rules but none matched the body fields

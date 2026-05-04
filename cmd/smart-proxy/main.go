@@ -28,6 +28,7 @@ import (
 	"github.com/spiohq/smart-proxy/internal/scheduler"
 	"github.com/spiohq/smart-proxy/internal/server"
 	"github.com/spiohq/smart-proxy/internal/storage"
+	"github.com/spiohq/smart-proxy/internal/tokenstore"
 )
 
 func main() {
@@ -95,7 +96,8 @@ func main() {
 	defer bodyStore.Close()
 
 	piiEngine := pii.NewEngine(registry)
-	asyncLogger := logging.NewAsyncLogger(metaStore, bodyStore, piiEngine, 10000)
+	lwaTokenStore := tokenstore.New()
+	asyncLogger := logging.NewAsyncLoggerWithTokenStore(metaStore, bodyStore, piiEngine, 10000, lwaTokenStore)
 	defer asyncLogger.Close()
 
 	// Background context for rotator + scheduler
@@ -152,7 +154,7 @@ func main() {
 	defer stopPromCollectors()
 
 	// Dashboard handler
-	dashHandler := dashboard.NewHandlerWithPII(metaStore, auditStore, bodyStore, piiEngine)
+	dashHandler := dashboard.NewHandlerWithPIIAndReplay(metaStore, auditStore, bodyStore, piiEngine, lwaTokenStore)
 	dashMux := dashboard.NewMux(dashHandler)
 
 	mountMetricsHandler(cfg, dashMux)
@@ -169,6 +171,9 @@ func main() {
 		rdtMiddlewareFn: rdtMiddlewareFn,
 		promMetrics:     promMetrics,
 	})
+
+	euHandler := factory(server.RegionEU)
+	dashHandler.SetProxyHandler(euHandler)
 
 	// Wrap the dashboard mux with the security-headers middleware (F-03)
 	// before handing it to the server. /metrics was already attached above

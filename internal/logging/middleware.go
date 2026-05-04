@@ -56,6 +56,14 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 				return
 			}
 
+			// Capture the raw token before pii.RedactHeaders strips it in buildLogEntry.
+			if ts := logger.TokenStore(); ts != nil {
+				m := merchant.MerchantFromContext(r.Context())
+				if tok := r.Header.Get("X-Amz-Access-Token"); tok != "" && m.Key != "" {
+					ts.Set(m.Key, tok)
+				}
+			}
+
 			meta := buildRequestLog(r, capture, piiRegistry, requestID, region, startTime, getInternalErrorReason)
 			entry := buildLogEntry(r, capture, piiRegistry, meta, requestID, requestBody, maxCaptureSize)
 			logger.Log(entry)
