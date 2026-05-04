@@ -21,6 +21,10 @@
     "vitest": "^4.1.2"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/manrope": "^5.2.8",
+    "@fontsource/space-grotesk": "^5.2.10",
+    "@material-symbols/font-400": "^0.44.4",
     "clsx": "^2.1.0",
     "tailwind-merge": "^2.2.0"
   },
