@@ -172,8 +172,11 @@ func main() {
 		promMetrics:     promMetrics,
 	})
 
-	euHandler := factory(server.RegionEU)
-	dashHandler.SetProxyHandler(euHandler)
+	dashHandler.SetRegionHandlers(map[string]http.Handler{
+		string(server.RegionEU): factory(server.RegionEU),
+		string(server.RegionNA): factory(server.RegionNA),
+		string(server.RegionFE): factory(server.RegionFE),
+	})
 
 	// Wrap the dashboard mux with the security-headers middleware (F-03)
 	// before handing it to the server. /metrics was already attached above

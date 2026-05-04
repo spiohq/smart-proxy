@@ -12,12 +12,13 @@ import (
 
 // Handler holds dependencies for all dashboard API endpoints.
 type Handler struct {
-	logStore     storage.Store
-	auditStore   audit.Store
-	bodyStore    bodies.BodyStore
-	piiEngine    *pii.Engine // optional; nil disables read-side redaction (test setups)
-	tokenStore   *tokenstore.Store
-	proxyHandler http.Handler
+	logStore       storage.Store
+	auditStore     audit.Store
+	bodyStore      bodies.BodyStore
+	piiEngine      *pii.Engine // optional; nil disables read-side redaction (test setups)
+	tokenStore     *tokenstore.Store
+	proxyHandler   http.Handler
+	regionHandlers map[string]http.Handler
 }
 
 // NewHandler creates a dashboard handler without read-side PII redaction.
@@ -48,8 +49,16 @@ func NewHandlerWithPIIAndReplay(logStore storage.Store, auditStore audit.Store, 
 }
 
 // SetProxyHandler injects the proxy handler used to forward replayed requests.
+// Deprecated: prefer SetRegionHandlers for correct per-region routing.
 func (h *Handler) SetProxyHandler(ph http.Handler) {
 	h.proxyHandler = ph
+}
+
+// SetRegionHandlers injects a per-region proxy handler map. When a replay is
+// executed, the handler matching entry.Region is selected; if no match is
+// found, the fallback proxyHandler (set via SetProxyHandler) is used.
+func (h *Handler) SetRegionHandlers(handlers map[string]http.Handler) {
+	h.regionHandlers = handlers
 }
 
 // NewMux returns an http.ServeMux with all API routes and SPA serving registered.

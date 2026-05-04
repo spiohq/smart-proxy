@@ -150,3 +150,93 @@ func TestHandleReplay_WithToken_ForwardsRequest(t *testing.T) {
 		t.Fatalf("expected statusCode=200, got %v", result["statusCode"])
 	}
 }
+
+func TestHandleReplay_RoutesToCorrectRegionHandler(t *testing.T) {
+	store, err := storage.NewSQLiteStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	auditStore := audit.NewSQLiteStore(store.DB())
+	ts := tokenstore.New()
+	ts.Set("SELLER_NA", "Atza|na-token")
+
+	// EU upstream responds with a marker so we can detect which handler was used.
+	euUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Region-Hit", "eu")
+		w.WriteHeader(200)
+		w.Write([]byte(`{"region":"eu"}`))
+	}))
+	defer euUpstream.Close()
+
+	naUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Region-Hit", "na")
+		w.WriteHeader(200)
+		w.Write([]byte(`{"region":"na"}`))
+	}))
+	defer naUpstream.Close()
+
+	makeForwardingHandler := func(upstreamURL string) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			u, _ := url.Parse(upstreamURL)
+			r.URL.Host = u.Host
+			r.URL.Scheme = u.Scheme
+			resp, err := http.DefaultClient.Do(r)
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+			defer resp.Body.Close()
+			for k, vals := range resp.Header {
+				for _, v := range vals {
+					w.Header().Add(k, v)
+				}
+			}
+			w.WriteHeader(resp.StatusCode)
+			body := make([]byte, 4096)
+			n, _ := resp.Body.Read(body)
+			w.Write(body[:n])
+		})
+	}
+
+	ctx := context.Background()
+	// Log entry is from the NA region.
+	logEntry := &storage.RequestLog{
+		ID:          "replay-region-na-001",
+		Timestamp:   time.Now().UTC(),
+		MerchantKey: "SELLER_NA",
+		Region:      "na",
+		Method:      "GET",
+		Path:        "/orders/v0/orders",
+		StatusCode:  200,
+		CacheStatus: "MISS",
+	}
+	if err := store.LogRequest(ctx, logEntry); err != nil {
+		t.Fatal(err)
+	}
+
+	h := dashboard.NewHandlerWithPIIAndReplay(store, auditStore, nil, nil, ts)
+	h.SetRegionHandlers(map[string]http.Handler{
+		"eu": makeForwardingHandler(euUpstream.URL),
+		"na": makeForwardingHandler(naUpstream.URL),
+	})
+	mux := dashboard.NewMux(h)
+
+	req := httptest.NewRequest("POST", "/api/v1/logs/replay-region-na-001/replay", nil)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", rr.Code)
+	}
+	var result map[string]any
+	json.NewDecoder(rr.Body).Decode(&result)
+	if result["available"] != true {
+		t.Fatalf("expected available=true, got %v", result["available"])
+	}
+	// The response body must come from the NA upstream, not EU.
+	body, _ := result["responseBody"].(map[string]any)
+	if body["region"] != "na" {
+		t.Fatalf("expected replay to hit NA handler, got responseBody=%v", result["responseBody"])
+	}
+}
