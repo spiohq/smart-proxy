@@ -12,14 +12,14 @@ type ResponseCapture struct {
 	http.ResponseWriter
 	body         *bytes.Buffer
 	statusCode   int
-	maxSize      int
+	maxSize      int64
 	overflow     bool
 	wroteHead    bool
 	bytesWritten int
 }
 
 // NewResponseCapture creates a ResponseCapture with the given max capture size.
-func NewResponseCapture(w http.ResponseWriter, maxSize int) *ResponseCapture {
+func NewResponseCapture(w http.ResponseWriter, maxSize int64) *ResponseCapture {
 	return &ResponseCapture{
 		ResponseWriter: w,
 		body:           &bytes.Buffer{},
@@ -40,10 +40,10 @@ func (c *ResponseCapture) WriteHeader(code int) {
 // Write writes to the client AND captures up to maxSize bytes for logging.
 func (c *ResponseCapture) Write(b []byte) (int, error) {
 	if !c.overflow {
-		remaining := c.maxSize - c.body.Len()
+		remaining := c.maxSize - int64(c.body.Len())
 		if remaining <= 0 {
 			c.overflow = true
-		} else if len(b) <= remaining {
+		} else if int64(len(b)) <= remaining {
 			c.body.Write(b)
 		} else {
 			c.body.Write(b[:remaining])
