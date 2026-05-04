@@ -200,7 +200,7 @@ Generic AUP duties (purpose limitation, no marketing use, org-change notificatio
 
 - [ ] `SP_PROXY_STRICT_MERCHANT=true` is set in production
 - [ ] `SP_PROXY_RATELIMIT_ENABLED=true` is set (default; verify not overridden)
-- [ ] `SP_PROXY_RATELIMIT_THROTTLE_FACTOR` is ≤ 1.0 and not increased beyond 1.0 (would exceed published SP-API limits)
+- [ ] `SP_PROXY_RATELIMIT_THROTTLE_FACTOR` is not set to a value outside (0, 1.0]; the proxy refuses to start if it is, but verify the running config matches intent
 - [ ] Dashboard not publicly reachable, or authenticating reverse proxy confirmed in front
 - [ ] If `SP_PROXY_BODIES_BACKEND=s3`: DPA executed with S3 provider; provider named in §4.9 disclosure
 - [ ] If `SP_PROXY_BODIES_BACKEND=s3`: `SP_PROXY_S3_SSE` is set; `SP_PROXY_S3_ENDPOINT` uses `https://`
@@ -258,7 +258,7 @@ Each Smart-Proxy AUP enforcement claim above is backed by code and (in almost al
 | Smart Proxy enforcement | AUP § | Implementation | Verified by |
 |---|---|---|---|
 | Per-merchant token-bucket rate limiting | §2.9, §3.10 | [internal/ratelimit/](../internal/ratelimit/); merchant key in [internal/merchant/](../internal/merchant/) | Unit tests in [internal/ratelimit/](../internal/ratelimit/); end-to-end in [test/e2e/ratelimit_test.go](../test/e2e/ratelimit_test.go) |
-| Throttle factor default 0.8 | §2.9 | [internal/config/config.go](../internal/config/config.go) | `TestDefaults_ThrottleFactor` in [internal/config/config_test.go](../internal/config/config_test.go) |
+| Throttle factor default 0.8 | §2.9 | [internal/config/config.go](../internal/config/config.go) | `TestLoad_Defaults` in [internal/config/config_test.go](../internal/config/config_test.go) |
 | Merchant-scoped cache keys | §4.4 | [internal/cache/keys.go](../internal/cache/keys.go), [internal/cache/middleware.go](../internal/cache/middleware.go) | [internal/cache/keys_test.go](../internal/cache/keys_test.go); end-to-end in [test/e2e/merchant_test.go](../test/e2e/merchant_test.go) |
 | PII excluded from cache (`PII_EXCLUDED` header) | §4.4 | [internal/cache/middleware.go](../internal/cache/middleware.go) | [internal/cache/middleware_test.go](../internal/cache/middleware_test.go), [test/e2e/cache_test.go](../test/e2e/cache_test.go) |
 | Tokens in process memory only (never persisted) | §3.1 | [internal/rdt/](../internal/rdt/) (in-memory map, no persistence); no token writers in [internal/storage/](../internal/storage/) or [internal/bodies/](../internal/bodies/) | Structural: verified by absence of token persistence; header redaction covered by [internal/pii/headers_test.go](../internal/pii/headers_test.go) |
