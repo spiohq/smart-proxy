@@ -57,10 +57,15 @@ var endpointPatterns = []struct {
 	// ── Product Pricing v0 ─────────────────────────────────────────────
 	{"/products/pricing/v0/items/", 7, "", "/products/pricing/v0/items/{asin}/offers"},
 	{"/products/pricing/v0/listings/", 7, "", "/products/pricing/v0/listings/{sku}/offers"},
+	// Batch pricing endpoints (POST, no path params)
+	{"/batches/products/pricing/v0/listingOffers", 6, "", "/batches/products/pricing/v0/listingOffers"},
+	{"/batches/products/pricing/v0/itemOffers", 6, "", "/batches/products/pricing/v0/itemOffers"},
 
 	// ── Product Fees v0 ────────────────────────────────────────────────
 	{"/products/fees/v0/listings/", 7, "", "/products/fees/v0/listings/{sku}/feesEstimate"},
 	{"/products/fees/v0/items/", 7, "", "/products/fees/v0/items/{asin}/feesEstimate"},
+	// Bulk fees endpoint (POST, no path params)
+	{"/products/fees/v0/feesEstimate", 5, "", "/products/fees/v0/feesEstimate"},
 
 	// ── Product Type Definitions ───────────────────────────────────────
 	{"/definitions/2020-09-01/productTypes/", 5, "", "/definitions/2020-09-01/productTypes/{productType}"},
