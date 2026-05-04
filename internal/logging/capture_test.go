@@ -49,7 +49,7 @@ func TestResponseCapture_OverflowProtection(t *testing.T) {
 
 	assert.True(t, cap.Overflow())
 	assert.Equal(t, int(maxSize), len(cap.CapturedBody())) // Capture truncated
-	assert.Equal(t, 50, rec.Body.Len())               // Client got everything
+	assert.Equal(t, 50, rec.Body.Len())                    // Client got everything
 }
 
 func TestResponseCapture_HeaderPassthrough(t *testing.T) {
