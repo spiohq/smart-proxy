@@ -75,6 +75,26 @@ var DefaultPIIRules = map[string][]FieldRedaction{
 		{JSONPath: "$.payload.Shipments[*].ShipTo.Phone", Mode: RedactModeRedact},
 		{JSONPath: "$.payload.Shipments[*].ShipTo.Email", Mode: RedactModeRedact},
 	},
+	// Single Shipping v1 shipment detail. Schema: Shipment.ShipTo and
+	// Shipment.ShipFrom at top level under $.payload (not an array).
+	"/shipping/v1/shipments/{shipmentId}": {
+		{JSONPath: "$.payload.shipTo.name", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.shipTo.addressLine1", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.shipTo.addressLine2", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.shipTo.addressLine3", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.shipTo.city", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.shipTo.stateOrRegion", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.shipTo.postalCode", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.shipTo.email", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.shipFrom.name", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.shipFrom.addressLine1", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.shipFrom.addressLine2", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.shipFrom.addressLine3", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.shipFrom.city", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.shipFrom.stateOrRegion", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.shipFrom.postalCode", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.shipFrom.email", Mode: RedactModeRedact},
+	},
 	"/mfn/v0/shipments": {
 		{JSONPath: "$.payload.ShipFromAddress.Name", Mode: RedactModeRedact},
 		{JSONPath: "$.payload.ShipFromAddress.AddressLine1", Mode: RedactModeRedact},
@@ -89,6 +109,26 @@ var DefaultPIIRules = map[string][]FieldRedaction{
 		{JSONPath: "$.payload.ShipToAddress.Phone", Mode: RedactModeRedact},
 		{JSONPath: "$.payload.ShipToAddress.Email", Mode: RedactModeRedact},
 	},
+	// Single MFN shipment detail. Schema: ShipFromAddress and ShipToAddress
+	// at top level under $.payload (not in a list).
+	"/mfn/v0/shipments/{shipmentId}": {
+		{JSONPath: "$.payload.ShipFromAddress.Name", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShipFromAddress.AddressLine1", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShipFromAddress.AddressLine2", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShipFromAddress.City", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShipFromAddress.StateOrRegion", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShipFromAddress.PostalCode", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShipFromAddress.Phone", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShipFromAddress.Email", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShipToAddress.Name", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShipToAddress.AddressLine1", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShipToAddress.AddressLine2", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShipToAddress.City", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShipToAddress.StateOrRegion", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShipToAddress.PostalCode", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShipToAddress.Phone", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.ShipToAddress.Email", Mode: RedactModeRedact},
+	},
 	"/fba/outbound/2020-07-01/fulfillmentOrders": {
 		{JSONPath: "$.payload.FulfillmentOrders[*].DestinationAddress.Name", Mode: RedactModeRedact},
 		{JSONPath: "$.payload.FulfillmentOrders[*].DestinationAddress.Line1", Mode: RedactModeRedact},
@@ -97,11 +137,29 @@ var DefaultPIIRules = map[string][]FieldRedaction{
 		{JSONPath: "$.payload.FulfillmentOrders[*].DestinationAddress.PostalCode", Mode: RedactModeRedact},
 		{JSONPath: "$.payload.FulfillmentOrders[*].DestinationAddress.Phone", Mode: RedactModeRedact},
 	},
+	// Single fulfillment order detail: DestinationAddress is at the top level
+	// under $.payload.FulfillmentOrder (not an array).
+	"/fba/outbound/2020-07-01/fulfillmentOrders/{orderId}": {
+		{JSONPath: "$.payload.FulfillmentOrder.DestinationAddress.Name", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.FulfillmentOrder.DestinationAddress.Line1", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.FulfillmentOrder.DestinationAddress.Line2", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.FulfillmentOrder.DestinationAddress.City", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.FulfillmentOrder.DestinationAddress.StateOrRegion", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.FulfillmentOrder.DestinationAddress.PostalCode", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.FulfillmentOrder.DestinationAddress.Phone", Mode: RedactModeRedact},
+	},
 	"/messaging/v1/orders/{orderId}/messages": {
 		{JSONPath: "$.payload.Messages[*].MessageText", Mode: RedactModeRedact},
 		{JSONPath: "$.payload.Messages[*].Attachments", Mode: RedactModeOmit},
 	},
 	"/finances/v0/financialEvents": {
+		{JSONPath: "$.payload.FinancialEvents.ShipmentEventList[*].AmazonOrderId", Mode: RedactModeRedact},
+	},
+	// Sub-endpoints share the same FinancialEvents schema as the top-level endpoint.
+	"/finances/v0/financialEventGroups/{eventGroupId}/financialEvents": {
+		{JSONPath: "$.payload.FinancialEvents.ShipmentEventList[*].AmazonOrderId", Mode: RedactModeRedact},
+	},
+	"/finances/v0/orders/{orderId}/financialEvents": {
 		{JSONPath: "$.payload.FinancialEvents.ShipmentEventList[*].AmazonOrderId", Mode: RedactModeRedact},
 	},
 	"/easyShip/2022-03-23/package": {
@@ -131,6 +189,19 @@ var DefaultPIIRules = map[string][]FieldRedaction{
 	},
 	"/datakiosk/2023-11-15/documents/{documentId}": {
 		{JSONPath: "$.documentUrl", Mode: RedactModeRedact},
+	},
+	// Vendor direct fulfillment purchase order: shipToParty carries the
+	// buyer's delivery address. Schema: vendorDirectFulfillmentOrdersV1.json.
+	"/vendor/directFulfillment/orders/2021-12-28/purchaseOrders/{purchaseOrderNumber}": {
+		{JSONPath: "$.payload.orderDetails.shipToParty.address.name", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.orderDetails.shipToParty.address.addressLine1", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.orderDetails.shipToParty.address.addressLine2", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.orderDetails.shipToParty.address.addressLine3", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.orderDetails.shipToParty.address.city", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.orderDetails.shipToParty.address.district", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.orderDetails.shipToParty.address.stateOrRegion", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.orderDetails.shipToParty.address.postalCode", Mode: RedactModeRedact},
+		{JSONPath: "$.payload.orderDetails.shipToParty.address.phone", Mode: RedactModeRedact},
 	},
 }
 
@@ -295,6 +366,18 @@ var DefaultRequestBodyPIIRules = map[string][]FieldRedaction{
 	// packageDetails}, labelFormat}. The buyer is referenced by
 	// amazonOrderId only, and Order IDs are not direct PII per Amazon's
 	// DPP definition. No request-body redaction needed.
+
+	// FBA outbound fulfillmentOrders/preview: request body contains
+	// destinationAddress (buyer delivery address). Schema: fulfillmentOutbound.json.
+	"/fba/outbound/2020-07-01/fulfillmentOrders/preview": {
+		{JSONPath: "$.destinationAddress.name", Mode: RedactModeRedact},
+		{JSONPath: "$.destinationAddress.line1", Mode: RedactModeRedact},
+		{JSONPath: "$.destinationAddress.line2", Mode: RedactModeRedact},
+		{JSONPath: "$.destinationAddress.city", Mode: RedactModeRedact},
+		{JSONPath: "$.destinationAddress.stateOrRegion", Mode: RedactModeRedact},
+		{JSONPath: "$.destinationAddress.postalCode", Mode: RedactModeRedact},
+		{JSONPath: "$.destinationAddress.phone", Mode: RedactModeRedact},
+	},
 }
 
 // shippingV2AddressRules is shared across the three v2 endpoints with
@@ -340,6 +423,8 @@ var DefaultFullBodyPIIEndpoints = map[string]bool{
 	"/orders/v0/orders/{orderId}/address":                 true,
 	"/orders/v0/orders/{orderId}/orderItems/buyerInfo":    true,
 	"/messaging/v1/orders/{orderId}/messages/{messageId}": true,
+	// Vendor DF packing slip is a buyer-facing shipping document (label + address).
+	"/vendor/directFulfillment/shipping/2021-12-28/packingSlips/{purchaseOrderNumber}": true,
 }
 
 // Registry maps endpoint patterns to PII field redaction rules.

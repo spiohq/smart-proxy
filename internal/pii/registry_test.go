@@ -488,6 +488,163 @@ func TestDocumentURLs_AreRedacted_DataKiosk(t *testing.T) {
 	assert.Contains(t, paths, "$.documentUrl")
 }
 
+// ── False-negative regression tests ──────────────────────────────────────────
+// These tests document endpoints that were previously missing from the PII
+// rule maps, causing responses to be served unredacted or (in fail-closed
+// mode) incorrectly treated as full-body PII.
+
+func TestOrderItemsBuyerInfo_IsFullBodyPII(t *testing.T) {
+	reg := NewRegistry()
+	// /orders/v0/orders/{orderId}/orderItems/buyerInfo returns ONLY buyer PII;
+	// the entire response body must be treated as PII, same as buyerInfo and address.
+	assert.True(t, reg.IsFullBodyPII("/orders/v0/orders/{orderId}/orderItems/buyerInfo", true))
+}
+
+func TestFBAOutboundFulfillmentOrder_HasFieldRules(t *testing.T) {
+	reg := NewRegistry()
+	// Single fulfillment order detail: has DestinationAddress at top-level
+	// (not inside FulfillmentOrders[*] array like the list endpoint).
+	rules := reg.RulesFor("/fba/outbound/2020-07-01/fulfillmentOrders/{orderId}")
+	require.NotEmpty(t, rules, "expected rules for /fba/outbound/2020-07-01/fulfillmentOrders/{orderId}")
+
+	var paths []string
+	for _, r := range rules {
+		paths = append(paths, r.JSONPath)
+	}
+	assert.Contains(t, paths, "$.payload.FulfillmentOrder.DestinationAddress.Name")
+	assert.Contains(t, paths, "$.payload.FulfillmentOrder.DestinationAddress.Line1")
+	assert.Contains(t, paths, "$.payload.FulfillmentOrder.DestinationAddress.PostalCode")
+}
+
+func TestShippingV1ShipmentDetail_HasFieldRules(t *testing.T) {
+	reg := NewRegistry()
+	// Single shipment detail: has ShipTo and ShipFrom at top level.
+	rules := reg.RulesFor("/shipping/v1/shipments/{shipmentId}")
+	require.NotEmpty(t, rules, "expected rules for /shipping/v1/shipments/{shipmentId}")
+
+	var paths []string
+	for _, r := range rules {
+		paths = append(paths, r.JSONPath)
+	}
+	assert.Contains(t, paths, "$.payload.shipTo.name")
+	assert.Contains(t, paths, "$.payload.shipTo.addressLine1")
+	assert.Contains(t, paths, "$.payload.shipFrom.name")
+	assert.Contains(t, paths, "$.payload.shipFrom.addressLine1")
+}
+
+func TestMFNShipmentDetail_HasFieldRules(t *testing.T) {
+	reg := NewRegistry()
+	// Single MFN shipment detail: has ShipFromAddress and ShipToAddress.
+	rules := reg.RulesFor("/mfn/v0/shipments/{shipmentId}")
+	require.NotEmpty(t, rules, "expected rules for /mfn/v0/shipments/{shipmentId}")
+
+	var paths []string
+	for _, r := range rules {
+		paths = append(paths, r.JSONPath)
+	}
+	assert.Contains(t, paths, "$.payload.ShipFromAddress.Name")
+	assert.Contains(t, paths, "$.payload.ShipFromAddress.AddressLine1")
+	assert.Contains(t, paths, "$.payload.ShipToAddress.Name")
+	assert.Contains(t, paths, "$.payload.ShipToAddress.AddressLine1")
+}
+
+func TestFinancesEventGroupFinancialEvents_HasFieldRules(t *testing.T) {
+	reg := NewRegistry()
+	// Sub-endpoint of financial event groups: same schema as /finances/v0/financialEvents.
+	rules := reg.RulesFor("/finances/v0/financialEventGroups/{eventGroupId}/financialEvents")
+	require.NotEmpty(t, rules, "expected rules for /finances/v0/financialEventGroups/{eventGroupId}/financialEvents")
+
+	var paths []string
+	for _, r := range rules {
+		paths = append(paths, r.JSONPath)
+	}
+	assert.Contains(t, paths, "$.payload.FinancialEvents.ShipmentEventList[*].AmazonOrderId")
+}
+
+func TestFinancesOrderFinancialEvents_HasFieldRules(t *testing.T) {
+	reg := NewRegistry()
+	// Sub-endpoint of orders financial events: same schema as /finances/v0/financialEvents.
+	rules := reg.RulesFor("/finances/v0/orders/{orderId}/financialEvents")
+	require.NotEmpty(t, rules, "expected rules for /finances/v0/orders/{orderId}/financialEvents")
+
+	var paths []string
+	for _, r := range rules {
+		paths = append(paths, r.JSONPath)
+	}
+	assert.Contains(t, paths, "$.payload.FinancialEvents.ShipmentEventList[*].AmazonOrderId")
+}
+
+func TestVendorDFPurchaseOrder_HasFieldRules(t *testing.T) {
+	reg := NewRegistry()
+	// Vendor direct fulfillment purchase order contains shipToParty.address.
+	rules := reg.RulesFor("/vendor/directFulfillment/orders/2021-12-28/purchaseOrders/{purchaseOrderNumber}")
+	require.NotEmpty(t, rules, "expected rules for vendor DF purchase order detail")
+
+	var paths []string
+	for _, r := range rules {
+		paths = append(paths, r.JSONPath)
+	}
+	assert.Contains(t, paths, "$.payload.orderDetails.shipToParty.address.addressLine1")
+	assert.Contains(t, paths, "$.payload.orderDetails.shipToParty.address.name")
+}
+
+func TestVendorDFPackingSlip_IsFullBodyPII(t *testing.T) {
+	reg := NewRegistry()
+	// Vendor direct fulfillment packing slip: the entire document is a
+	// buyer-facing shipping label / packing slip and must be treated as PII.
+	assert.True(t, reg.IsFullBodyPII("/vendor/directFulfillment/shipping/2021-12-28/packingSlips/{purchaseOrderNumber}", true))
+}
+
+func TestFBAOutboundFulfillmentOrdersPreview_HasRequestBodyRules(t *testing.T) {
+	reg := NewRegistry()
+	// Preview endpoint: request body contains DestinationAddress.
+	rules := reg.RequestBodyRulesFor("/fba/outbound/2020-07-01/fulfillmentOrders/preview")
+	require.NotEmpty(t, rules, "expected request-body rules for /fba/outbound/2020-07-01/fulfillmentOrders/preview")
+
+	var paths []string
+	for _, r := range rules {
+		paths = append(paths, r.JSONPath)
+	}
+	assert.Contains(t, paths, "$.destinationAddress.name")
+	assert.Contains(t, paths, "$.destinationAddress.line1")
+}
+
+func TestContainsPII_FBAOutboundFulfillmentOrder(t *testing.T) {
+	reg := NewRegistry()
+	r := &http.Request{
+		Method: http.MethodGet,
+		URL:    mustParseURL("/fba/outbound/2020-07-01/fulfillmentOrders/ORDER-123"),
+	}
+	assert.True(t, reg.ContainsPII(r))
+}
+
+func TestContainsPII_ShippingV1ShipmentDetail(t *testing.T) {
+	reg := NewRegistry()
+	r := &http.Request{
+		Method: http.MethodGet,
+		URL:    mustParseURL("/shipping/v1/shipments/SHIP-123"),
+	}
+	assert.True(t, reg.ContainsPII(r))
+}
+
+func TestContainsPII_MFNShipmentDetail(t *testing.T) {
+	reg := NewRegistry()
+	r := &http.Request{
+		Method: http.MethodGet,
+		URL:    mustParseURL("/mfn/v0/shipments/SHIP-123"),
+	}
+	assert.True(t, reg.ContainsPII(r))
+}
+
+func TestRequestBodyContainsPII_FBAOutboundPreview(t *testing.T) {
+	reg := NewRegistry()
+	r := &http.Request{
+		Method: http.MethodPost,
+		URL:    mustParseURL("/fba/outbound/2020-07-01/fulfillmentOrders/preview"),
+	}
+	assert.True(t, reg.RequestBodyContainsPII(r))
+}
+
 func TestDocumentURL_RedactionRoundTrip(t *testing.T) {
 	// Verifies that RedactForLogging actually replaces the URL value with
 	// the redaction marker for a Reports document response.
