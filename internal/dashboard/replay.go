@@ -36,7 +36,8 @@ func (h *Handler) handleReplay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.tokenStore == nil || h.proxyHandler == nil {
+	proxyHandler := h.handlerForRegion(entry.Region)
+	if h.tokenStore == nil || proxyHandler == nil {
 		writeJSON(w, http.StatusOK, replayResponse{
 			Available: false,
 			Reason:    "Replay is not available: proxy not fully configured.",
@@ -62,7 +63,7 @@ func (h *Handler) handleReplay(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rec := httptest.NewRecorder()
-	h.proxyHandler.ServeHTTP(rec, replayReq)
+	proxyHandler.ServeHTTP(rec, replayReq)
 
 	writeJSON(w, http.StatusOK, collectReplayResponse(rec.Result(), bodyUnavailable))
 }
@@ -108,6 +109,17 @@ func buildReplayRequest(r *http.Request, entry *storage.RequestLog, token string
 		req.Header.Set("X-SP-Proxy-Region", entry.Region)
 	}
 	return req, nil
+}
+
+// handlerForRegion returns the proxy handler for the given region string.
+// Falls back to proxyHandler when no region-specific handler is registered.
+func (h *Handler) handlerForRegion(region string) http.Handler {
+	if h.regionHandlers != nil {
+		if ph, ok := h.regionHandlers[region]; ok {
+			return ph
+		}
+	}
+	return h.proxyHandler
 }
 
 // collectReplayResponse reads the recorder result and builds the response DTO.
