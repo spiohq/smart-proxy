@@ -38,7 +38,7 @@ func TestResponseCapture_DefaultStatusCode(t *testing.T) {
 
 func TestResponseCapture_OverflowProtection(t *testing.T) {
 	rec := httptest.NewRecorder()
-	maxSize := 10
+	maxSize := int64(10)
 	cap := NewResponseCapture(rec, maxSize)
 
 	// Write more than maxSize
@@ -48,8 +48,8 @@ func TestResponseCapture_OverflowProtection(t *testing.T) {
 	assert.Equal(t, 50, n) // Full data written to client
 
 	assert.True(t, cap.Overflow())
-	assert.Equal(t, maxSize, len(cap.CapturedBody())) // Capture truncated
-	assert.Equal(t, 50, rec.Body.Len())               // Client got everything
+	assert.Equal(t, int(maxSize), len(cap.CapturedBody())) // Capture truncated
+	assert.Equal(t, 50, rec.Body.Len())                    // Client got everything
 }
 
 func TestResponseCapture_HeaderPassthrough(t *testing.T) {

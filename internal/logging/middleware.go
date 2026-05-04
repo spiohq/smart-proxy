@@ -45,7 +45,7 @@ func LoggingMiddleware(logger *AsyncLogger, piiRegistry *pii.Registry, region st
 			// only the coarse externally-safe value.
 			r, getInternalErrorReason := proxy.PrepareInternalErrorReason(r)
 
-			capture := NewResponseCapture(w, int(maxCaptureSize))
+			capture := NewResponseCapture(w, maxCaptureSize)
 			requestBody := captureRequestBody(r, maxCaptureSize)
 
 			next.ServeHTTP(capture, r)
