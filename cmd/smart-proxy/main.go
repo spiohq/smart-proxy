@@ -23,6 +23,7 @@ import (
 	"github.com/spiohq/smart-proxy/internal/prommetrics"
 	"github.com/spiohq/smart-proxy/internal/proxy"
 	"github.com/spiohq/smart-proxy/internal/purge"
+	"github.com/spiohq/smart-proxy/internal/validation"
 	"github.com/spiohq/smart-proxy/internal/ratelimit"
 	"github.com/spiohq/smart-proxy/internal/rdt"
 	"github.com/spiohq/smart-proxy/internal/scheduler"
@@ -135,14 +136,29 @@ func main() {
 	auditRetention, _ := time.ParseDuration(cfg.Purge.AuditRetention)
 
 	// Scheduler
-	sched := scheduler.New([]scheduler.Job{
+	schedJobs := []scheduler.Job{
 		{Name: "metadata-purge", Fn: purge.MetadataPurgeJob(metaStore, auditLogger, metadataRetention), Interval: 1 * time.Hour},
 		{Name: "audit-purge", Fn: purge.AuditPurgeJob(auditStore, auditRetention), Interval: 24 * time.Hour},
-	})
+	}
+
+	validationMw, validationRefreshFn := setupValidation(ctx, cfg)
+	if cfg.Validation.Enabled {
+		refreshInterval, parseErr := time.ParseDuration(cfg.Validation.RefreshInterval)
+		if parseErr != nil {
+			refreshInterval = 24 * time.Hour
+		}
+		schedJobs = append(schedJobs, scheduler.Job{
+			Name:     "validation-spec-refresh",
+			Fn:       validationRefreshFn,
+			Interval: refreshInterval,
+		})
+	}
+
+	sched := scheduler.New(schedJobs)
 	go sched.Run(ctx)
 
 	slog.Info("scheduler started",
-		"jobs", 2,
+		"jobs", len(schedJobs),
 		"metadataRetention", cfg.Purge.MetadataRetention,
 	)
 
@@ -170,6 +186,7 @@ func main() {
 		rlMiddleware:    rlMiddleware,
 		rdtMiddlewareFn: rdtMiddlewareFn,
 		promMetrics:     promMetrics,
+		validationMw:    validationMw,
 	})
 
 	dashHandler.SetRegionHandlers(map[string]http.Handler{
@@ -314,6 +331,7 @@ type regionFactoryDeps struct {
 	rlMiddleware    proxy.Middleware
 	rdtMiddlewareFn func(server.Region) proxy.Middleware
 	promMetrics     *prommetrics.Metrics
+	validationMw    proxy.Middleware
 }
 
 // buildRegionFactory returns the per-region handler factory that the server
@@ -329,7 +347,7 @@ func buildRegionFactory(cfg *config.Config, d regionFactoryDeps) func(server.Reg
 		}
 		logMiddleware := logging.LoggingMiddleware(d.asyncLogger, d.registry, string(region), cfg.Bodies.MaxCaptureSize)
 		rdtMw := d.rdtMiddlewareFn(region)
-		middlewares := []proxy.Middleware{d.resolver.Middleware(), logMiddleware, rdtMw, d.cacheMiddleware, d.rlMiddleware}
+		middlewares := []proxy.Middleware{d.resolver.Middleware(), logMiddleware, d.validationMw, rdtMw, d.cacheMiddleware, d.rlMiddleware}
 		if d.promMetrics != nil {
 			// Prometheus middleware is outermost - wraps everything including logging.
 			middlewares = append([]proxy.Middleware{prommetrics.Middleware(d.promMetrics, string(region))}, middlewares...)
@@ -375,4 +393,47 @@ func (s storeOrphanNotifier) OnBodiesDeleted(ctx context.Context, files []string
 		slog.Info("rotator: nulled body refs", "count", n, "files", len(files))
 	}
 	return nil
+}
+
+func setupValidation(ctx context.Context, cfg *config.Config) (proxy.Middleware, func(context.Context) error) {
+	noopMw := func(next http.Handler) http.Handler { return next }
+	noopRefresh := func(context.Context) error { return nil }
+
+	if !cfg.Validation.Enabled {
+		slog.Info("request validation disabled")
+		return noopMw, noopRefresh
+	}
+	if cfg.Validation.SpecsDir == "" {
+		slog.Warn("request validation enabled but SP_PROXY_VALIDATION_SPECS_DIR is not set; validation disabled")
+		return noopMw, noopRefresh
+	}
+
+	router, err := validation.DownloadAndLoad(ctx, cfg.Validation.SpecsURL, cfg.Validation.SpecsDir)
+	if err != nil {
+		slog.Warn("request validation: initial spec load failed; validation disabled", "error", err)
+		return noopMw, noopRefresh
+	}
+	if router == nil {
+		slog.Warn("request validation: no specs loaded; validation disabled")
+		return noopMw, noopRefresh
+	}
+
+	ar := &validation.AtomicRouter{}
+	ar.Store(router)
+	slog.Info("request validation enabled", "specsDir", cfg.Validation.SpecsDir)
+
+	refreshFn := func(ctx context.Context) error {
+		r, err := validation.DownloadAndLoad(ctx, cfg.Validation.SpecsURL, cfg.Validation.SpecsDir)
+		if err != nil {
+			slog.Warn("validation: spec refresh failed, keeping existing router", "error", err)
+			return nil
+		}
+		if r != nil {
+			ar.Store(r)
+			slog.Info("validation: specs refreshed")
+		}
+		return nil
+	}
+
+	return proxy.Middleware(validation.NewMiddlewareFromAtomic(ar)), refreshFn
 }
