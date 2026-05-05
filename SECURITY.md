@@ -43,6 +43,12 @@ By default `/metrics` is mounted on the dashboard port (loopback-only when `SP_P
 
 Prometheus labels include `merchant`, so a scrape job exposed beyond the operator's network would leak per-tenant traffic shape. Keep `/metrics` on a network where only the metrics collector can reach it.
 
+### Validation bypass header
+
+When `SP_PROXY_VALIDATION_ENABLED=true`, the `X-SP-Proxy-Skip-Validation: true` request header bypasses proxy-side OpenAPI validation for a single request. This is intended for trusted internal callers that have already validated their payload, or for rollout scenarios where a specific endpoint is known to behave outside the published spec.
+
+**Only allow this header from trusted callers.** Because Smart Proxy has no built-in authentication, any client that can reach the proxy port can set this header and bypass validation entirely. If you rely on validation as a guardrail against buggy clients, enforce at the network level that untrusted callers cannot set `X-SP-Proxy-Skip-Validation`. An upstream authenticating reverse proxy can strip the header before forwarding to the proxy.
+
 ### Network exposure
 
 Smart Proxy is designed to run as a **sidecar or private-network component**. It MUST NOT be exposed directly to the public internet without an authenticating reverse proxy in front of it. The proxy honors `X-SP-Proxy-Merchant-Id` for tenant identification; an unauthenticated public endpoint would let any caller self-claim any merchant key.
@@ -102,7 +108,7 @@ We will keep you informed throughout the process. If you haven't received an ack
 
 The following are **in scope** for security reports:
 
-- **Proxy bypass:** requests that circumvent rate limiting, caching, or PII redaction when they shouldn't.
+- **Proxy bypass:** requests that circumvent rate limiting, caching, PII redaction, or OpenAPI validation when they shouldn't.
 - **PII leakage:** personally identifiable information appearing in logs, cache, metrics, or the dashboard when redaction is enabled.
 - **Authentication/authorization issues:** unauthorized access to the dashboard, metrics endpoint, or stored request data.
 - **Injection attacks:** SQL injection in SQLite queries, header injection, path traversal, or template injection in the dashboard.
