@@ -50,8 +50,8 @@ func collectErrors(err error) []error {
 
 func humanMessage(err error) string {
 	var reqErr *openapi3filter.RequestError
-	if errors.As(err, &reqErr) && reqErr.Err != nil {
-		return reqErr.Err.Error()
+	if errors.As(err, &reqErr) {
+		return reqErr.Error()
 	}
 	return err.Error()
 }
