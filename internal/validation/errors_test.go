@@ -66,7 +66,9 @@ func TestFormatValidationErrors_MessageIsHumanReadable(t *testing.T) {
 	}
 	body := validation.FormatValidationErrors(err)
 	var envelope struct {
-		Errors []struct{ Message string `json:"message"` } `json:"errors"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
 	}
 	require.NoError(t, json.Unmarshal(body, &envelope))
 	require.Len(t, envelope.Errors, 1)

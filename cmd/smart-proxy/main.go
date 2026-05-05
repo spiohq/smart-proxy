@@ -23,13 +23,13 @@ import (
 	"github.com/spiohq/smart-proxy/internal/prommetrics"
 	"github.com/spiohq/smart-proxy/internal/proxy"
 	"github.com/spiohq/smart-proxy/internal/purge"
-	"github.com/spiohq/smart-proxy/internal/validation"
 	"github.com/spiohq/smart-proxy/internal/ratelimit"
 	"github.com/spiohq/smart-proxy/internal/rdt"
 	"github.com/spiohq/smart-proxy/internal/scheduler"
 	"github.com/spiohq/smart-proxy/internal/server"
 	"github.com/spiohq/smart-proxy/internal/storage"
 	"github.com/spiohq/smart-proxy/internal/tokenstore"
+	"github.com/spiohq/smart-proxy/internal/validation"
 )
 
 func main() {
