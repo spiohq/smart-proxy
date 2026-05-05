@@ -100,11 +100,20 @@ type Config struct {
 	Purge      PurgeConfig
 	Prometheus PrometheusConfig
 	RDT        RDTConfig
+	Validation ValidationConfig
 }
 
 // RDTConfig holds settings for automatic RDT (Restricted Data Token) handling.
 type RDTConfig struct {
 	AutoMint bool // When true, proxy automatically mints RDTs for PII endpoints
+}
+
+// ValidationConfig holds settings for proxy-side OpenAPI request validation.
+type ValidationConfig struct {
+	Enabled         bool
+	SpecsURL        string
+	SpecsDir        string
+	RefreshInterval string
 }
 
 // ServerConfig holds port bindings and shutdown timeout.
@@ -211,6 +220,12 @@ func loadConfig(logger *slog.Logger) *Config {
 		},
 		RDT: RDTConfig{
 			AutoMint: iBool("SP_PROXY_RDT_AUTO_MINT", false),
+		},
+		Validation: ValidationConfig{
+			Enabled:         iBool("SP_PROXY_VALIDATION_ENABLED", false),
+			SpecsURL:        envStr("SP_PROXY_VALIDATION_SPECS_URL", "https://github.com/amzn/selling-partner-api-models/archive/refs/heads/main.zip"),
+			SpecsDir:        envStr("SP_PROXY_VALIDATION_SPECS_DIR", ""),
+			RefreshInterval: envStr("SP_PROXY_VALIDATION_REFRESH_INTERVAL", "24h"),
 		},
 	}
 }

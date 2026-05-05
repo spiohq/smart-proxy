@@ -22,6 +22,7 @@ import (
 	"github.com/spiohq/smart-proxy/internal/rdt"
 	"github.com/spiohq/smart-proxy/internal/server"
 	"github.com/spiohq/smart-proxy/internal/storage"
+	"github.com/spiohq/smart-proxy/internal/validation"
 	"github.com/spiohq/smart-proxy/test/mock"
 	"github.com/stretchr/testify/require"
 )
@@ -35,8 +36,9 @@ type TestEnv struct {
 }
 
 type testEnvExtras struct {
-	tokenMap     map[string]string
-	piiFailClose bool
+	tokenMap        map[string]string
+	piiFailClose    bool
+	validationRouter validation.Router
 }
 
 type Option func(*config.Config, *testEnvExtras)
@@ -87,6 +89,10 @@ func WithTokenMap(tokenMap map[string]string) Option {
 
 func WithRDTAutoMint() Option {
 	return func(cfg *config.Config, _ *testEnvExtras) { cfg.RDT.AutoMint = true }
+}
+
+func WithValidationRouter(router validation.Router) Option {
+	return func(_ *config.Config, extras *testEnvExtras) { extras.validationRouter = router }
 }
 
 func WithPIIFailClosed() Option {
@@ -189,10 +195,13 @@ func NewTestEnv(t *testing.T, opts ...Option) *TestEnv {
 		rdtMiddleware = func(next http.Handler) http.Handler { return next }
 	}
 
+	validationMW := validation.NewMiddleware(extras.validationRouter)
+	validationMiddleware := proxy.Middleware(validationMW)
+
 	factory := func(region server.Region) http.Handler {
 		rp := proxy.NewTestProxyWithLimiter(mockHost, limiter)
 		logMiddleware := logging.LoggingMiddleware(asyncLogger, registry, string(region), 0)
-		return proxy.BuildChain(rp, resolver.Middleware(), logMiddleware, rdtMiddleware, cacheMiddleware, rlMiddleware)
+		return proxy.BuildChain(rp, resolver.Middleware(), logMiddleware, rdtMiddleware, cacheMiddleware, rlMiddleware, validationMiddleware)
 	}
 
 	srv, err := server.New(cfg, factory, dashMux)
