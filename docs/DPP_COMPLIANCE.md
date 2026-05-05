@@ -348,6 +348,8 @@ False positives are possible (e.g. seller emails in support-message bodies that 
 
 ## 7. AUP compliance notes
 
+For the full AUP compliance reference (shared responsibility matrix, enforcement details, operator obligations, and audit checklist), see [docs/AUP_COMPLIANCE.md](AUP_COMPLIANCE.md). The notes below summarise the intersections most relevant to DPP reviewers.
+
 Smart Proxy interacts with AUP at these specific points:
 
 - **§4.1 (PII only for fulfillment).** Not enforced by Smart Proxy. The proxy does not know *why* the operator's code is calling an endpoint. Operators must ensure that PII obtained via Smart Proxy is used only for fulfillment, tax, legal, or order communication purposes.
