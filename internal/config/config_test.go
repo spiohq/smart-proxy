@@ -524,3 +524,23 @@ func TestWarnings_NonLoopbackRegionBindInProduction(t *testing.T) {
 	}
 	assert.True(t, found, "production + non-loopback region bind must emit a warning, got %v", warnings)
 }
+
+func TestValidationConfigDefaults(t *testing.T) {
+	cfg := Load()
+	assert.False(t, cfg.Validation.Enabled)
+	assert.Equal(t, "https://github.com/amzn/selling-partner-api-models/archive/refs/heads/main.zip", cfg.Validation.SpecsURL)
+	assert.Equal(t, "", cfg.Validation.SpecsDir)
+	assert.Equal(t, "24h", cfg.Validation.RefreshInterval)
+}
+
+func TestValidationConfigFromEnv(t *testing.T) {
+	t.Setenv("SP_PROXY_VALIDATION_ENABLED", "true")
+	t.Setenv("SP_PROXY_VALIDATION_SPECS_DIR", "/tmp/specs")
+	t.Setenv("SP_PROXY_VALIDATION_SPECS_URL", "https://example.com/specs.zip")
+	t.Setenv("SP_PROXY_VALIDATION_REFRESH_INTERVAL", "12h")
+	cfg := Load()
+	assert.True(t, cfg.Validation.Enabled)
+	assert.Equal(t, "/tmp/specs", cfg.Validation.SpecsDir)
+	assert.Equal(t, "https://example.com/specs.zip", cfg.Validation.SpecsURL)
+	assert.Equal(t, "12h", cfg.Validation.RefreshInterval)
+}
