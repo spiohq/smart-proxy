@@ -403,12 +403,18 @@ func setupValidation(ctx context.Context, cfg *config.Config) (proxy.Middleware,
 		slog.Info("request validation disabled")
 		return noopMw, noopRefresh
 	}
-	if cfg.Validation.SpecsDir == "" {
-		slog.Warn("request validation enabled but SP_PROXY_VALIDATION_SPECS_DIR is not set; validation disabled")
-		return noopMw, noopRefresh
+	specsDir := cfg.Validation.SpecsDir
+	if specsDir == "" {
+		var err error
+		specsDir, err = os.MkdirTemp("", "sp-proxy-specs-*")
+		if err != nil {
+			slog.Warn("request validation: could not create temp specs dir; validation disabled", "error", err)
+			return noopMw, noopRefresh
+		}
+		slog.Info("request validation: no SP_PROXY_VALIDATION_SPECS_DIR set, using temp dir", "specsDir", specsDir)
 	}
 
-	router, err := validation.DownloadAndLoad(ctx, cfg.Validation.SpecsURL, cfg.Validation.SpecsDir)
+	router, err := validation.DownloadAndLoad(ctx, cfg.Validation.SpecsURL, specsDir)
 	if err != nil {
 		slog.Warn("request validation: initial spec load failed; validation disabled", "error", err)
 		return noopMw, noopRefresh
@@ -420,10 +426,10 @@ func setupValidation(ctx context.Context, cfg *config.Config) (proxy.Middleware,
 
 	ar := &validation.AtomicRouter{}
 	ar.Store(router)
-	slog.Info("request validation enabled", "specsDir", cfg.Validation.SpecsDir)
+	slog.Info("request validation enabled", "specsDir", specsDir)
 
 	refreshFn := func(ctx context.Context) error {
-		r, err := validation.DownloadAndLoad(ctx, cfg.Validation.SpecsURL, cfg.Validation.SpecsDir)
+		r, err := validation.DownloadAndLoad(ctx, cfg.Validation.SpecsURL, specsDir)
 		if err != nil {
 			slog.Warn("validation: spec refresh failed, keeping existing router", "error", err)
 			return nil

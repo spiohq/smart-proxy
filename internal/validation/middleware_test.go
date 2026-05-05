@@ -221,6 +221,27 @@ func TestMiddleware_MultipleErrorsAllReturned(t *testing.T) {
 	assert.Greater(t, strings.Count(bodyStr, `"code":"InvalidInput"`), 1)
 }
 
+func TestMiddleware_BodyRestoredAfterValidation(t *testing.T) {
+	mw := validation.NewMiddleware(buildTestRouter(t))
+	const payload = `{"productType":"LUGGAGE"}`
+	var receivedBody string
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		receivedBody = string(b)
+		w.WriteHeader(http.StatusOK)
+	}))
+	body := strings.NewReader(payload)
+	req := httptest.NewRequest(http.MethodPut,
+		"/listings/2021-08-01/items/SELLER1/SKU1?marketplaceIds=A",
+		body,
+	)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	assert.Equal(t, http.StatusOK, rr.Code)
+	assert.Equal(t, payload, receivedBody, "body must be readable by the upstream handler after validation")
+}
+
 func TestMiddleware_ValidationHeaderAbsentOnSuccess(t *testing.T) {
 	mw := validation.NewMiddleware(buildTestRouter(t))
 	called := false

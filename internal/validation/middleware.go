@@ -1,6 +1,8 @@
 package validation
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"sync/atomic"
 
@@ -84,6 +86,9 @@ func NewMiddlewareFromAtomic(ar *AtomicRouter) Middleware {
 
 // validate runs OpenAPI request validation against router. It returns nil when
 // the route is not found (graceful degradation for unknown endpoints).
+//
+// r.Body is restored after reading so the upstream proxy can forward it
+// unchanged; without this the body would be empty after validation.
 func validate(router Router, r *http.Request) error {
 	route, pathParams, err := router.FindRoute(r)
 	if err != nil {
@@ -91,6 +96,17 @@ func validate(router Router, r *http.Request) error {
 			return nil
 		}
 		return nil
+	}
+
+	// Read and restore the body so the reverse proxy can forward it.
+	var bodyBytes []byte
+	if r.Body != nil {
+		bodyBytes, err = io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		if err != nil {
+			return err
+		}
+		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	}
 
 	input := &openapi3filter.RequestValidationInput{
@@ -101,7 +117,15 @@ func validate(router Router, r *http.Request) error {
 			MultiError: true,
 		},
 	}
-	return openapi3filter.ValidateRequest(r.Context(), input)
+	if err := openapi3filter.ValidateRequest(r.Context(), input); err != nil {
+		return err
+	}
+
+	// Restore body a second time so downstream handlers get a fresh reader.
+	if bodyBytes != nil {
+		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	}
+	return nil
 }
 
 // writeValidationError sends a 400 Bad Request with SP-API-style JSON body.

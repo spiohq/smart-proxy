@@ -36,6 +36,31 @@ const minimalSpec = `{
         ],
         "responses": {"200": {"description": "OK"}}
       }
+    },
+    "/listings/2021-08-01/items/{sellerId}/{sku}": {
+      "put": {
+        "operationId": "putListingsItem",
+        "parameters": [
+          {"name": "sellerId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "sku", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "marketplaceIds", "in": "query", "required": true, "schema": {"type": "string"}}
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["productType"],
+                "properties": {
+                  "productType": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {"200": {"description": "OK"}}
+      }
     }
   }
 }`
@@ -227,4 +252,33 @@ func TestE2E_Validation_DisabledByNilRouter_PassesThrough(t *testing.T) {
 	assert.Empty(t, resp.Header.Get("X-SP-Proxy-Validation"))
 
 	_ = strings.NewReader("") // keep strings import used by other tests
+}
+
+// TestE2E_Validation_RequestBodyForwardedToUpstream verifies that a valid
+// request body is not consumed by validation and still reaches the upstream.
+// This is a regression test for the body-drain bug: ValidateRequest reads
+// r.Body, so the middleware must restore it before calling next.
+func TestE2E_Validation_RequestBodyForwardedToUpstream(t *testing.T) {
+	env := NewTestEnv(t,
+		WithCacheDisabled(),
+		WithRateLimitDisabled(),
+		WithValidationRouter(buildValidationRouter(t)),
+	)
+
+	const payload = `{"productType":"LUGGAGE"}`
+	req, err := http.NewRequest(http.MethodPut,
+		env.ProxyURL+"/listings/2021-08-01/items/SELLER1/SKU1?marketplaceIds=ATVPDKIKX0DER",
+		strings.NewReader(payload),
+	)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Len(t, env.MockSPAPI.Requests, 1)
+	assert.Equal(t, payload, string(env.MockSPAPI.Requests[0].Body),
+		"request body must arrive at upstream unchanged after validation")
 }
