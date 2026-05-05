@@ -46,7 +46,7 @@ func NewMiddleware(router Router) Middleware {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if r.Header.Get("X-SP-Proxy-Skip-Validation") != "" {
+			if r.Header.Get("X-SP-Proxy-Skip-Validation") == "true" {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -69,7 +69,7 @@ func NewMiddlewareFromAtomic(ar *AtomicRouter) Middleware {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if r.Header.Get("X-SP-Proxy-Skip-Validation") != "" {
+			if r.Header.Get("X-SP-Proxy-Skip-Validation") == "true" {
 				next.ServeHTTP(w, r)
 				return
 			}
