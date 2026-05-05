@@ -101,6 +101,29 @@ func TestMiddleware_SkipHeader_PassesThrough(t *testing.T) {
 	assert.Empty(t, rr.Header().Get("X-SP-Proxy-Validation"))
 }
 
+func TestMiddleware_SkipHeader_NonTrueValues_StillValidates(t *testing.T) {
+	// Only the exact string "true" bypasses validation; case variants and
+	// truthy aliases must still go through the validator.
+	nonTrueValues := []string{"True", "TRUE", "1", "yes", "on", ""}
+	for _, val := range nonTrueValues {
+		t.Run("value="+val, func(t *testing.T) {
+			mw := validation.NewMiddleware(buildTestRouter(t))
+			called := false
+			handler := mw(passThroughHandler(&called))
+			// Missing required marketplaceIds; would pass through if skip worked.
+			req := httptest.NewRequest(http.MethodGet, "/orders/v0/orders", nil)
+			if val != "" {
+				req.Header.Set("X-SP-Proxy-Skip-Validation", val)
+			}
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+			assert.False(t, called, "upstream must not be called; skip header %q must not bypass validation", val)
+			assert.Equal(t, http.StatusBadRequest, rr.Code)
+			assert.Equal(t, "rejected", rr.Header().Get("X-SP-Proxy-Validation"))
+		})
+	}
+}
+
 func TestMiddleware_UnknownPath_PassesThrough(t *testing.T) {
 	mw := validation.NewMiddleware(buildTestRouter(t))
 	called := false
